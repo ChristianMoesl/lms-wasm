@@ -69,12 +69,16 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
   def quote(s: Def): String = s match {
     case s @ Sym(n) => rename.getOrElseUpdate(s, s"x${rename.size}")
-//    case Sym(n) => s"x$n"
     case Const(s: String) => "\""+s.replace("\"", "\\\"")
       .replace("\n","\\n")
       .replace("\t","\\t")+"\\00\"" // TODO: more escapes?
     case Const(b: Boolean) => if (b) "1" else "0"
     case Const(x) => x.toString
+  }
+
+  override def typeBlockRes(x: Exp): Manifest[_] = x match {
+    case Const(x: Boolean) => manifest[Boolean]
+    case _ => super.typeBlockRes(x)
   }
 
   // Remap auxiliary function C specific
@@ -159,8 +163,8 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   val comparisonop = Set("==", "!=", "<", ">", ">=", "<=")
 
   def emitBinaryOperation(id: String): Unit = {
-    val lhs = stack.remove(0)
-    val rhs = stack.remove(0)
+    val lhs = pop()
+    val rhs = pop()
     val f = typeFeature(rhs)
 
     assert(lhs == rhs, s"Type convertion is mandatory: $lhs != $rhs")
@@ -400,7 +404,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     val result = if (res != Const(())) {
       registerFunction(name, args.map(a => t(a)), Some(t(res)))
-      s"(result ${remap(typeBlockRes(res))}) "
+      s"(result ${remap(t(res))}) "
     } else {
       registerFunction(name, args.map(a => t(a)))
       ""
@@ -448,6 +452,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 //    case n @ Node(_, op, List(_, _), _) if binop contains op =>
 //      shallow(n)
 
+    // Control flow
     case n @ Node(s,"?",c::(a:Block)::(b:Block)::_,_) =>
       shallow(c); emitln()
       emitln(s"if ");
@@ -466,6 +471,40 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       traverse(b)
       emitln(s"br $$$loop")
       emitln("end")
+      emitln("end")
+
+    case n @ Node(_, "switch", (guard: Exp)::default::others, _) =>
+      val switchTypes = Set[Manifest[_]](manifest[Long], manifest[Int], manifest[Short], manifest[Char])
+
+      assert(switchTypes contains t(guard))
+
+      val breakLabel = allocateControlLabel()
+      emitln(s"block $$$breakLabel")
+
+      others.grouped(2).foreach {
+        case Seq(Const(cases), block: Block) =>
+          val nextCaseLabel = allocateControlLabel()
+          val caseLabel = allocateControlLabel()
+          emitln(s"block $$$nextCaseLabel")
+          emitln(s"block $$$caseLabel")
+          cases.asInstanceOf[Seq[Const]].foreach { x =>
+            shallow(guard); shallow(x); emitBinaryOperation("=="); emitln()
+            emitln(s"br_if $$$caseLabel"); pop()
+          }
+          emitln(s"br $$$nextCaseLabel")
+          emitln("end")
+
+          quoteBlock(traverse(block))
+
+          emitln(s"br $$$breakLabel")
+
+          emitln("end")
+      }
+      default match {
+        case block: Block =>
+          quoteBlock(traverse(block))
+        case _ =>
+      }
       emitln("end")
 
     case n @ Node(_,"generate-comment", List(Const(x: String)),_) =>
@@ -499,11 +538,16 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         shallow(string)
       }
 
-    case _ => // val defintion
+    case n @ Node(s, op, List(lhs, rhs), _) => // val defintion
       emitLocalVariable(quote(n.n), t(n.n))
       shallow(n); emitln()
       emitln(s"${scope(n.n)}.set $$${quote(n.n)}");
       pop()
+
+    case _ =>
+      println("============traverse(n: Node)")
+      println(n)
+      println("============")
   }
 
   def nowraper(numStms: Int, l: Option[Node], y: Block)(f: => Unit) = f
@@ -543,7 +587,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     tmp
   }
 
-  def t(e: lms.core.Backend.Exp): Manifest[_] = typeMap.getOrElse(e, manifest[Unknown])
+  def t(e: lms.core.Backend.Exp): Manifest[_] = typeBlockRes(e)
 
   def shallow(n: Node): Unit = n match {
 
@@ -579,9 +623,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     case n @ Node(s,"var_get", List(x), _) =>
       if (dce.live(s))
         shallow(x)
- //     emitln(s"${scope(x)}.get $$${quote(x)}")
- //     push(t(s))
-
 
     case _ =>
       println("============shallow(n: Node)")
@@ -601,7 +642,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emitln(s"${remap(manifest[String])}.const $offset")
       push(manifest[String])
 
-    case n @ Const(c) =>
+    case n @ Const(_) =>
       emitln(s"${remap(t(n))}.const ${quote(n)}")
       push(t(n))
 
