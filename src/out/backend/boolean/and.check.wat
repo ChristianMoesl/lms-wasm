@@ -1,11 +1,11 @@
-(func $Snippet (export "Snippet") (param $x1 i32)
-  local.get $x1
+(func $Snippet (export "Snippet") (param $x0 i32)
+  local.get $x0
   i32.const 1
   i32.gt_s
   if (result i32)
     i32.const 10
     call $printf
-    local.get $x1
+    local.get $x0
     i32.const 2
     i32.gt_s
   else

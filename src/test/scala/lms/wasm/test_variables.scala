@@ -5,9 +5,9 @@ import lms.core.virtualize
 import lms.macros.SourceContext
 
 class VariablesTest extends TutorialFunSuite {
-  val under = "backend/"
+  val under = "backend/variables/"
 
-  test("variable_r") {
+  test("read") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -19,14 +19,14 @@ class VariablesTest extends TutorialFunSuite {
     }
 
     val src = driver.code
-    checkOut("variable_r", {
+    checkSnippet("read", {
       println(src)
       println(";; output:")
       driver.eval(4)
     })
   }
 
-  test("variable_w_dead") {
+  test("write_dead") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -36,14 +36,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_w_dead", {
+    checkSnippet("write_dead", {
       println(src)
       println(";; output:")
       driver.eval(4)
     })
   }
 
-  test("variable_w") {
+  test("write") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -54,14 +54,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_w", {
+    checkSnippet("write", {
       println(src)
       println(";; output:")
       driver.eval(4)
     })
   }
 
-  test("variable_rw") {
+  test("read_write") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -73,14 +73,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_rw", {
+    checkSnippet("read_write", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while_dead1") {
+  test("while_dead1") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -91,14 +91,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while_dead1", {
+    checkSnippet("while_dead1", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while_dead2") {
+  test("while_dead2") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -111,14 +111,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while_dead2", {
+    checkSnippet("while_dead2", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while1") {
+  test("while1") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -130,14 +130,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while1", {
+    checkSnippet("while1", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while2") {
+  test("while2") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -149,14 +149,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while2", {
+    checkSnippet("while2", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while3") {
+  test("while3") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -168,14 +168,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while3", {
+    checkSnippet("while3", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_while4") {
+  test("while4") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -193,14 +193,14 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while4", {
+    checkSnippet("while4", {
       println(src)
       println(";; output:")
       driver.eval(5)
     })
   }
 
-  test("variable_if_nested") {
+  test("if_nested") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -216,7 +216,7 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_if_nested", {
+    checkSnippet("if_nested", {
       println(src)
       println(";; output:")
       driver.eval(10)
@@ -226,7 +226,7 @@ class VariablesTest extends TutorialFunSuite {
     })
   }
 
-  test("variable_if_nested_dead") {
+  test("if_nested_dead") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -237,7 +237,7 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_if_nested_dead", {
+    checkSnippet("if_nested_dead", {
       println(src)
       println(";; output:")
       driver.eval(10)
@@ -247,7 +247,7 @@ class VariablesTest extends TutorialFunSuite {
     })
   }
 
-  test("variable_write_after_read") {
+  test("write_after_read") {
     val driver = new DslDriverWasm[Int, Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -262,7 +262,7 @@ class VariablesTest extends TutorialFunSuite {
     }
 
     val src = driver.code
-    checkOut("variable_write_after_read", {
+    checkSnippet("write_after_read", {
       println(src)
       println(";; output:")
       driver.eval(-1)
@@ -270,7 +270,7 @@ class VariablesTest extends TutorialFunSuite {
     })
   }
 
-  test("variable_while_deps_read") {
+  test("while_deps_read") {
     val driver = new DslDriverWasm[Int,Unit] {
       @virtualize
       def snippet(arg: Rep[Int]) = {
@@ -290,7 +290,7 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
     val src = driver.code
-    checkOut("variable_while_deps_read", {
+    checkSnippet("while_deps_read", {
       println(src)
       println(";; output:")
       driver.eval(2)
