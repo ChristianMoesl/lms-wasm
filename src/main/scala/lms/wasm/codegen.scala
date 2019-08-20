@@ -111,6 +111,24 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
  //   emitln("drop") // TODO: Where to drop result?
   }
 
+  val unaryop = Set("-","!","&")
+
+  def remapUnaryOp(id: String) = id match {
+    case "!" => "eqz"
+    case "-" => ???
+    case "&" => ???
+  }
+
+  def emitUnaryOperation(id: String): Unit = {
+    val t = pop()
+
+    emit(s"${remap(t)}.${remapUnaryOp(id)}")
+
+    push(manifest[Boolean])
+  }
+
+  val binop = Set("+","-","*","/","%","==","!=","<",">",">=","<=","&","|","<<",">>", ">>>", "&&", "||", "^")
+
   def sign(signed: Boolean) = if (signed) "s" else "u"
 
   def remapBinOp(id: String, s: Boolean) = id match {
@@ -130,13 +148,11 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     case ">>" => s"shr_${sign(s)}"
     case ">>>" => s"shr_${sign(s)}"
     case "%" => s"rem_${sign(s)}"
-    case "&&" => "and"
+    case "&&" => ???
     case "||" => ???
     case "^" => "xor"
   }
 
-  val unaryop = Set("-","!","&")
-  val binop = Set("+","-","*","/","%","==","!=","<",">",">=","<=","&","|","<<",">>", ">>>", "&&", "||", "^")
   val comparisonop = Set("==", "!=", "<", ">", ">=", "<=")
 
   def emitBinaryOperation(id: String): Unit = {
@@ -504,6 +520,12 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   def t(e: lms.core.Backend.Exp): Manifest[_] = typeMap.getOrElse(e, manifest[Unknown])
 
   def shallow(n: Node): Unit = n match {
+
+    case Node(s, "!", List(exp), _) =>
+      shallow(exp); emitln()
+      emitUnaryOperation("!"); emitln()
+      assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
+
     case n @ Node(s, op, List(lhs, rhs), _) =>
       shallow(lhs); emitln()
       shallow(rhs); emitln()
