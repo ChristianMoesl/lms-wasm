@@ -38,34 +38,59 @@ trait TutorialFunSuite extends LibSuite {
     printIndented(content)(out)
     out.close()
   }
-  def checkOut(label: String, suffix: String, thunk: => Unit) = {
+  def checkSnippet(label: String, thunk: => Unit) = {
     val output = utils.captureOut(try thunk catch { case e: Throwable => e.printStackTrace })
-    check(label, output, suffix = suffix)
+    check(label, output, checkLibrary = false)
   }
-  def check(label: String, raw_code: String, suffix: String = "scala") = {
+  def checkOut(label: String, thunk: => Unit) = {
+    val output = utils.captureOut(try thunk catch { case e: Throwable => e.printStackTrace })
+    check(label, output)
+  }
+  def check(label: String, raw_code: String, checkLibrary: Boolean = true) = {
     val fileprefix = prefix+under+label
-    val name = fileprefix+".check."+suffix
-    val aname = fileprefix+".actual."+suffix
-    val expected = readFile(name)
-    val code = indent(raw_code, suffix)
+    val name = fileprefix+".check.wat"
+    val aname = fileprefix+".actual.wat"
+    val expected = if (checkLibrary) readFile(name) else removeBoilerplate(readFile(name))
+    val code = indent(if (checkLibrary) raw_code else removeBoilerplate(raw_code))
     if (expected != code) {
       val wname = if (overwriteCheckFiles) name else aname
       println("writing " + wname)
       writeFile(wname, code)
     } else {
      val f = new File(aname)
-     if (f.exists) f.delete
+    // if (f.exists) f.delete
    }
     if (!overwriteCheckFiles) {
       assert(expected == code, name)
     }
   }
-  def indent(str: String, suffix: String) = {
+  def removeBoilerplate(code: String): String = {
+    val lines = code.split("[\n\r]")
+    var b = new StringBuilder
+
+    var output = false
+    var indent = 0
+
+    for (line <- lines) {
+      if (line.contains(";; output:") || output) {
+        output = true
+        b ++= line + '\n'
+      } else if (line.contains("(func $Snippet ") && indent == 0) {
+        indent += 1
+        b ++= line + '\n'
+      } else if (indent > 0) {
+        indent += line.chars().mapToLong{ case '(' => 1; case ')' => -1; case _ => 0 }.sum().toInt
+        b ++= line + '\n'
+      }
+    }
+    b.toString
+  }
+  def indent(str: String) = {
     val s = new StringWriter
-    printIndented(str, suffix)(new PrintWriter(s))
+    printIndented(str)(new PrintWriter(s))
     s.toString
   }
-  def printIndented(str: String, suffix: String = "scala")(out: PrintWriter): Unit = {
+  def printIndented(str: String)(out: PrintWriter): Unit = {
     val lines = str.split("[\n\r]")
     var indent = 0
     for (l0 <- lines) {
@@ -75,25 +100,23 @@ trait TutorialFunSuite extends LibSuite {
         var close = 0
         var initClose = 0
         var nonWsChar = false
-        if (suffix == "wat") {
-          l match {
-            case s if s contains "br_if" =>
-            case s if s contains "if" => open += 1
-            case s if s contains "block" => open += 1
-            case s if s contains "loop" => open += 1
-            case s if s contains "then" => close += 1
-            case s if s contains "else" =>
-              open += 1
-              close += 1
-            case s if s contains "end" => close += 1
-            case _ =>
-          }
+        l match {
+          case s if s contains "br_if" =>
+          case s if s contains "if" => open += 1
+          case s if s contains "block" => open += 1
+          case s if s contains "loop" => open += 1
+          case s if s contains "then" => close += 1
+          case s if s contains "else" =>
+            open += 1
+            close += 1
+          case s if s contains "end" => close += 1
+          case _ =>
         }
         l foreach {
-          case '(' if suffix == "wat" =>  {
+          case '(' =>  {
             open += 1
           }
-          case ')' if suffix == "wat" =>  {
+          case ')' =>  {
             close += 1
           }
           case x => if (!nonWsChar && !x.isWhitespace) {
