@@ -415,7 +415,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     if (res != Const(()))
       pop()
 
-  } // ensuring(stack.isEmpty, s"stack has ${stack.size} elements at end of function $name")
+  } ensuring(stack.isEmpty, s"stack has ${stack.size} elements at end of function $name")
 
   def scope(variable: Def): String = {
     if ((symbolTable contains quote(variable)) && (symbolTable(quote(variable)).isInstanceOf[Variable]))
@@ -430,6 +430,8 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       super.traverseCompact(ns, y)
     }
   }
+
+  private def emitVarSet(sym: Sym) = { emitln(s"${scope(sym)}.set $$${quote(sym)}"); pop() }
 
   private def emitResultType(m: Manifest[_]) = emit(if (m == manifest[Unit]) "" else s" (result ${remap(m)})")
 
@@ -460,26 +462,25 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
   var controlLabel = 0
   override def traverse(n: Node): Unit = n match {
+
+    // Variables
     case n @ Node(s, "var_new", List(exp), eff) =>
       emitLocalVariable(quote(s), t(s))
       shallow(exp); emitln()
-      emitln(s"${scope(s)}.set $$${quote(s)}");
-      pop()
+      emitVarSet(s)
 
-    case n @ Node(s, "var_set", List(x, y), _) =>
+    case n @ Node(_, "var_set", List(x: Sym, y), _) =>
       shallow(y); emitln()
-      emitln(s"${scope(x)}.set $$${quote(x)}")
-      pop()
+      emitVarSet(x)
 
     // Control flow
-    case n @ Node(s,"?",c::(a:Block)::(b:Block)::_,_) =>
+    case n @ Node(_,"?",c::(a:Block)::(b:Block)::_,_) =>
       shallow(c); emitln()
-      emitln(s"if ");
-      pop()
+      emitln(s"if "); pop()
       quoteBlock(traverse(a))
       quoteElseBlock(traverse(b))
 
-    case n @ Node(f,"W",List(c:Block,b:Block),_) =>
+    case n @ Node(_,"W",List(c:Block,b:Block),_) =>
       emitBlock { block => emitLoop { loop =>
         quoteBlock(traverse(c))
         emitln(s"${remap(stack.head)}.eqz")
@@ -499,8 +500,8 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
             emitBlock { nextCaseLabel =>
               emitBlock { caseLabel =>
                 cases.asInstanceOf[Seq[Const]].foreach { x =>
-                  shallow(guard);
-                  shallow(x);
+                  shallow(guard)
+                  shallow(x)
                   emitBinaryOperation("==")
                   emitBrIf(caseLabel)
                 }
@@ -517,6 +518,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         }
       }
 
+    // Comments
     case n @ Node(_,"generate-comment", List(Const(x: String)),_) =>
       emit(";; "); emitln(x)
 
@@ -530,12 +532,13 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       if (dce.live(s)) {
         emitLocalVariable(quote(s), t(s))
         quoteBlock(traverse(b))
-        emitln(s"${scope(s)}.set $$${quote(s)}"); pop()
+        emitVarSet(s)
       } else
         traverse(b)
 
       emitln("\n;;# " + str)
 
+    // MiscOps
     case n @ Node(_, "printf", List(Const("%d\n"), exp), _) =>
       emitPrintf()
       emitFunctionCall("printf") {
@@ -548,11 +551,10 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         shallow(string)
       }
 
-    case n @ Node(s, op, List(lhs, rhs), _) => // val defintion
+    case n @ Node(_, _, List(_, _), _) => // val defintion
       emitLocalVariable(quote(n.n), t(n.n))
       shallow(n); emitln()
-      emitln(s"${scope(n.n)}.set $$${quote(n.n)}");
-      pop()
+      emitVarSet(n.n)
 
     case _ =>
       println("============traverse(n: Node)")
@@ -634,17 +636,14 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     case InlineSym(n) => shallow(n)
 
     case n @ Sym(_) =>
-      emitln(s"${scope(n)}.get $$${quote(n)}")
-      push(t(n))
+      emitln(s"${scope(n)}.get $$${quote(n)}"); push(t(n))
 
     case n @ Const(s: String) =>
       val offset = registerString(n)
-      emitln(s"${remap(manifest[String])}.const $offset")
-      push(manifest[String])
+      emitln(s"${remap(manifest[String])}.const $offset"); push(manifest[String])
 
     case n @ Const(_) =>
-      emitln(s"${remap(t(n))}.const ${quote(n)}")
-      push(t(n))
+      emitln(s"${remap(t(n))}.const ${quote(n)}"); push(t(n))
 
     case _ =>
       println("============shallow(n: Def)")
