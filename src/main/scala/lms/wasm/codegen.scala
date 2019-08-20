@@ -163,13 +163,13 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   val comparisonop = Set("==", "!=", "<", ">", ">=", "<=")
 
   def emitBinaryOperation(id: String): Unit = {
-    val lhs = pop()
     val rhs = pop()
+    val lhs = pop()
     val f = typeFeature(rhs)
 
     assert(lhs == rhs, s"Type convertion is mandatory: $lhs != $rhs")
 
-    emit(s"${remap(rhs)}.${remapBinOp(id, f.signed)}")
+    emitln(s"${remap(rhs)}.${remapBinOp(id, f.signed)}")
 
     if (comparisonop contains id)
       push(manifest[Boolean])
@@ -402,15 +402,10 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     val res = body.res
     val args = body.in
 
-    val result = if (res != Const(())) {
-      registerFunction(name, args.map(a => t(a)), Some(t(res)))
-      s"(result ${remap(t(res))}) "
-    } else {
-      registerFunction(name, args.map(a => t(a)))
-      ""
-    }
+    emit(s"""(func $$$name (export "$name") ${args map(s => s"(param $$${quote(s)} ${remap(t(s))})") mkString(" ")}""")
+    emitResultType(t(res)); emitln()
 
-    emitln(s"""(func $$$name (export "$name") ${args map(s => s"(param $$${quote(s)} ${remap(t(s))})") mkString(" ")} $result""")
+    registerFunction(name, args.map(a => t(a)), if (res != Const(())) Some(t(res)) else None)
 
     localVariableStream.write(capture(traverse(body)).toByteArray)
     stream.write(localVariableStream.toByteArray)
@@ -436,6 +431,33 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     }
   }
 
+  private def emitResultType(m: Manifest[_]) = emit(if (m == manifest[Unit]) "" else s" (result ${remap(m)})")
+
+  private def emitIf(result: Manifest[_] = manifest[Unknown])(f: () => Unit) = emitIfThenElse(result)(f, None)
+  private def emitIfThenElse(result: Manifest[_] = manifest[Unknown])(thenF: () => Unit, elseF: Option[() => Unit]): Unit = {
+    emit("if"); emitResultType(result); emitln(); pop()
+    thenF()
+    elseF.foreach { f =>
+      val ifType = pop()
+      emitln("else")
+      f()
+      assert(ifType == stack.head)
+    }
+    emitln("end")
+  }
+
+  private def emitBr(label: String) = emitln(s"br $label")
+  private def emitBrIf(label: String) = { emitln(s"br_if $label"); pop() }
+
+  private def emitLoop(f: (String) => Unit) = emitBlockKind("loop")(f)
+  private def emitBlock(f: (String) => Unit) = emitBlockKind("block")(f)
+  private def emitBlockKind(kind: String)(f: (String) => Unit): Unit = {
+    val label = s"$$${allocateControlLabel()}"
+    emitln(s"$kind $label")
+    f(label)
+    emitln("end")
+  }
+
   var controlLabel = 0
   override def traverse(n: Node): Unit = n match {
     case n @ Node(s, "var_new", List(exp), eff) =>
@@ -449,9 +471,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emitln(s"${scope(x)}.set $$${quote(x)}")
       pop()
 
-//    case n @ Node(_, op, List(_, _), _) if binop contains op =>
-//      shallow(n)
-
     // Control flow
     case n @ Node(s,"?",c::(a:Block)::(b:Block)::_,_) =>
       shallow(c); emitln()
@@ -461,51 +480,42 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       quoteElseBlock(traverse(b))
 
     case n @ Node(f,"W",List(c:Block,b:Block),_) =>
-      val block = allocateControlLabel()
-      val loop = allocateControlLabel()
-      emitln(s"block $$$block")
-      emitln(s"loop $$$loop")
-      quoteBlock(traverse(c))
-      emitln(s"${remap(pop())}.eqz")
-      emitln(s"br_if $$$block")
-      traverse(b)
-      emitln(s"br $$$loop")
-      emitln("end")
-      emitln("end")
+      emitBlock { block => emitLoop { loop =>
+        quoteBlock(traverse(c))
+        emitln(s"${remap(stack.head)}.eqz")
+        emitBrIf(block)
+        traverse(b)
+        emitBr(loop)
+      }}
 
     case n @ Node(_, "switch", (guard: Exp)::default::others, _) =>
       val switchTypes = Set[Manifest[_]](manifest[Long], manifest[Int], manifest[Short], manifest[Char])
 
       assert(switchTypes contains t(guard))
 
-      val breakLabel = allocateControlLabel()
-      emitln(s"block $$$breakLabel")
+      emitBlock { breakLabel =>
+        others.grouped(2).foreach {
+          case Seq(Const(cases), block: Block) =>
+            emitBlock { nextCaseLabel =>
+              emitBlock { caseLabel =>
+                cases.asInstanceOf[Seq[Const]].foreach { x =>
+                  shallow(guard);
+                  shallow(x);
+                  emitBinaryOperation("==")
+                  emitBrIf(caseLabel)
+                }
+                emitBr(nextCaseLabel)
+              }
+              quoteBlock(traverse(block))
 
-      others.grouped(2).foreach {
-        case Seq(Const(cases), block: Block) =>
-          val nextCaseLabel = allocateControlLabel()
-          val caseLabel = allocateControlLabel()
-          emitln(s"block $$$nextCaseLabel")
-          emitln(s"block $$$caseLabel")
-          cases.asInstanceOf[Seq[Const]].foreach { x =>
-            shallow(guard); shallow(x); emitBinaryOperation("=="); emitln()
-            emitln(s"br_if $$$caseLabel"); pop()
-          }
-          emitln(s"br $$$nextCaseLabel")
-          emitln("end")
-
-          quoteBlock(traverse(block))
-
-          emitln(s"br $$$breakLabel")
-
-          emitln("end")
+              emitBr(breakLabel)
+            }
+        }
+        default match {
+          case block: Block => quoteBlock(traverse(block))
+          case _ =>
+        }
       }
-      default match {
-        case block: Block =>
-          quoteBlock(traverse(block))
-        case _ =>
-      }
-      emitln("end")
 
     case n @ Node(_,"generate-comment", List(Const(x: String)),_) =>
       emit(";; "); emitln(x)
@@ -599,26 +609,16 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     case n @ Node(s, op, List(lhs, rhs), _) =>
       shallow(lhs); emitln()
       shallow(rhs); emitln()
-      emitBinaryOperation(op); emitln()
+      emitBinaryOperation(op)
       assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
 
     case n @ Node(s,"?",List(c, a: Block, b: Block),_) if a.isPure && a.res == Const(true) =>
       shallow(c)
-      emitln("if (result i32)"); pop()
-      shallow(a.res)
-      emitln("else"); val ifType = pop()
-      quoteBlock(traverse(b))
-      emitln("end");
-      assert(ifType == stack.head)
+      emitIfThenElse(manifest[Boolean])(() => shallow(a.res), Some(() => quoteBlock(traverse(b))))
 
     case n @ Node(s,"?",List(c, a: Block, b: Block),_) if b.isPure && b.res == Const(false) =>
       shallow(c)
-      emitln("if (result i32)"); pop()
-      quoteBlock(traverse(a))
-      emitln("else"); val ifType = pop()
-      shallow(b.res);
-      emitln("end");
-      assert(ifType == stack.head)
+      emitIfThenElse(manifest[Boolean])(() => quoteBlock(traverse(a)), Some(() => shallow(b.res)))
 
     case n @ Node(s,"var_get", List(x), _) =>
       if (dce.live(s))
