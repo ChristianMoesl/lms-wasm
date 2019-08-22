@@ -31,7 +31,7 @@
     end
   end
   local.get $x3
-  call $printf
+  call $printlnInt
 )
 ;; output:
 36

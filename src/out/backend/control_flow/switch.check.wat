@@ -8,8 +8,8 @@
         br_if $2
         br $1
       end
-      i32.const 46
-      call $puts
+      i32.const 20
+      call $printlnString
       br $0
     end
     block $3
@@ -24,16 +24,16 @@
         br_if $4
         br $3
       end
-      i32.const 52
-      call $puts
+      i32.const 26
+      call $printlnString
       br $0
     end
-    i32.const 58
-    call $puts
+    i32.const 32
+    call $printlnString
   end
 )
 ;; output:
-1
-2
-2
-3
+20
+26
+26
+32

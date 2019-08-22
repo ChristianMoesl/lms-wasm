@@ -3,7 +3,7 @@
   i32.const 1
   local.set $x1
   i32.const 1
-  call $printf
+  call $printlnInt
   local.get $x0
   i32.const 0
   i32.gt_s
@@ -15,7 +15,7 @@
     local.set $x1
   end
   local.get $x1
-  call $printf
+  call $printlnInt
 )
 ;; output:
 1

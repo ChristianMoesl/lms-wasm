@@ -14,7 +14,7 @@
         i32.eqz
         br_if $0
         local.get $x1
-        call $printf
+        call $printlnInt
         local.get $x1
         i32.const 1
         i32.add
@@ -23,14 +23,14 @@
       end
     end
     i32.const 1
-    call $printf
+    call $printlnInt
   end
   local.get $x1
-  call $printf
+  call $printlnInt
   local.get $x1
   i32.const 1
   i32.add
-  call $printf
+  call $printlnInt
 )
 ;; output:
 1

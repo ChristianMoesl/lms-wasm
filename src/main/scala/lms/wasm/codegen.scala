@@ -2,6 +2,7 @@ package lms.wasm
 
 import scala.collection.mutable
 import java.io.{ByteArrayOutputStream, PrintStream}
+import java.nio.file.{Files, Path}
 
 import lms.core._
 import lms.core.Backend._
@@ -52,6 +53,8 @@ case class StringLiteral(id: String, offset: Int) extends SymbolEntry(id)
 case class DataBlock(id: String, offset: Int, size: Int) extends SymbolEntry(id)
 
 class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
+
+  private val maxIntStringLength = (math.ceil(math.log10(math.pow(2, 64))) + 2).toInt
 
   var lastNL = false
   def emit(s: String): Unit = { stream.print(s); lastNL = false }
@@ -177,51 +180,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       push(rhs)
   }
 
-  def emitPrintf(): Unit = {
-    if (symbolTable contains "printf" ) return
-
-    emitPuts()
-    emitMalloc()
-    emitItoa()
-    emitPuts()
-
-    val maxIntStringLength = (math.ceil(math.log10(math.pow(2, 64))) + 2).toInt
-
-    registerFunction("printf", List(manifest[Int]), None,
-      s"""
-        |(func $$printf (param $$n i32)
-        |    (local $$str i32)
-        |    (local $$len i32)
-        |    (local.set $$str (call $$malloc (i32.const $maxIntStringLength)))
-        |    (local.set $$len (call $$itoa (local.get $$n) (local.get $$str) (i32.const 10)))
-        |    (i32.store8 (i32.add (local.get $$str) (local.get $$len)) (i32.const 10)) ;; add LF
-        |    (local.set $$len (i32.add (local.get $$len) (i32.const 1)))
-        |    (i32.store8 (i32.add (local.get $$str) (local.get $$len)) (i32.const 0))  ;; 0 terminated
-        |
-        |    (call $$puts (local.get $$str))
-        |  )
-        |""".stripMargin)
-  }
-
-  def emitPuts(): Unit = {
-    if (symbolTable contains "puts") return
-
-    emitStrLen()
-
-    registerFunction("puts", List(manifest[String]), None,
-      """
-        |(func $puts (param $str i32)
-        |    (i32.store (i32.const 0) (local.get $str))
-        |    (i32.store (i32.const 4) (call $strlen (local.get $str)))
-        |    (drop (call $fd_write
-        |      (i32.const 1) ;; file_descriptor - 1 for stdout
-        |      (i32.const 0) ;; *iovs - The pointer to the iov array, which is stored at memory location 0
-        |      (i32.const 1) ;; iovs_len - We're printing 1 string stored in an iov - so one.
-        |      (i32.const 8))) ;; nwritten - A place in memory to store the number of bytes writen
-        |  )
-        |""".stripMargin)
-  }
-
   def emitStrLen(): Unit = {
     if (symbolTable contains "strlen") return
 
@@ -311,11 +269,13 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         |""".stripMargin)
   }
 
-  def emitWasiAPIImports(): Unit = {
-    registerDataBlock("wasi_api_params", 4 * 5)
-    registerLibraryFunction("fd_write", List(manifest[Int], manifest[Int], manifest[Int], manifest[Int]), manifest[Int])
-    registerLibraryFunction("args_sizes_get", List(manifest[Int], manifest[Int]), manifest[Int])
-    registerLibraryFunction("args_get", List(manifest[Int], manifest[Int]), manifest[Int])
+  def emitEnvironmentImports(): Unit = {
+    registerDataBlock("syscall_params", 4 * 5)
+    registerEnvironmentFunction("printlnString", List(manifest[String]))
+    registerEnvironmentFunction("printlnInt", List(manifest[Int]))
+    registerEnvironmentFunction("printlnFloat", List(manifest[Float]))
+    registerEnvironmentFunction("printlnBoolean", List(manifest[Boolean]))
+    registerEnvironmentFunction("exit", List(manifest[Int]))
   }
 
   private val importSection = new WasmSection(id = 2)
@@ -367,15 +327,17 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     result
   }
 
-  def registerLibraryFunction(id: String, paramTypes: List[Manifest[_]], resultType: Manifest[_]) = {
+  def registerEnvironmentFunction(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]] = None) = {
     require(paramTypes.nonEmpty)
 
-    symbolTable += (id -> Function(id, paramTypes, Some(resultType)))
+    symbolTable += (id -> Function(id, paramTypes, resultType))
 
     importSection.register(id, this) {
       val pTypes = paramTypes.map(t => remap(t)).mkString(" ")
 
-      emitln(s"""(import "wasi_unstable" "$id" (func $$$id (param $pTypes) (result ${remap(resultType)})))""")
+      val result = if (resultType.isDefined) s" (result ${remap(resultType.get)})" else ""
+
+      emitln(s"""(import "env" "$id" (func $$$id (param $pTypes)$result))""")
     }
   }
 
@@ -434,6 +396,44 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   private def emitVarSet(sym: Sym) = { emitln(s"${scope(sym)}.set $$${quote(sym)}"); pop() }
 
   private def emitResultType(m: Manifest[_]) = emit(if (m == manifest[Unit]) "" else s" (result ${remap(m)})")
+
+  private def emitConvert(to: Manifest[_]): Unit = {
+    val from = pop()
+
+    require(from != to)
+
+    emit(s"${remap(to)}.")
+
+    def wrapChar(): Unit = {
+      emitln(s"i32.const 255")
+      emitln("and")
+    }
+
+    if (from == manifest[Boolean]) {
+      if (to == manifest[Int] || to == manifest[Char]) ""
+      else if (to == manifest[Long]) emit(s"extend_u/${remap(from)}")
+      else if (to == manifest[Float] || to == manifest[Double]) emit(s"convert_u/${remap(from)}")
+      else ???
+    } else if (from == manifest[Int] || from == manifest[Long]) {
+      if (to == manifest[Boolean]) ??? // TODO: do we need this case?
+      else if (to == manifest[Char]) { emitln(s"wrap_s/${remap(from)}"); wrapChar() }
+      else if (from == manifest[Int] && to == manifest[Long]) emit(s"extend_s/${remap(from)}")
+      else if (from == manifest[Long] && to == manifest[Int]) emit(s"wrap_s/${remap(from)}")
+      else if (to == manifest[Float] || to == manifest[Double]) emit(s"convert_s/${remap(from)}")
+      else ???
+    } else if (from == manifest[Float] || from == manifest[Double]) {
+      if (to == manifest[Boolean]) ??? // TODO: do we need this case?
+      else if (to == manifest[Char]) { emitln(s"trunc_u/${remap(from)}"); wrapChar() }
+      else if (from == manifest[Float] && to == manifest[Double]) emit(s"promote/${remap(from)}")
+      else if (from == manifest[Double] && to == manifest[Float]) emit(s"demote/${remap(from)}")
+      else if (to == manifest[Int] || to == manifest[Long]) emit(s"trunc_s/${remap(from)}")
+      else ???
+    } else ???
+
+    emitln()
+
+    push(to)
+  }
 
   private def emitIf(result: Manifest[_] = manifest[Unknown])(f: () => Unit) = emitIfThenElse(result)(f, None)
   private def emitIfThenElse(result: Manifest[_] = manifest[Unknown])(thenF: () => Unit, elseF: Option[() => Unit]): Unit = {
@@ -540,16 +540,34 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     // MiscOps
     case n @ Node(_, "printf", List(Const("%d\n"), exp), _) =>
-      emitPrintf()
-      emitFunctionCall("printf") {
+      emitFunctionCall("printlnInt") {
         shallow(exp)
       }
 
     case n @ Node(_, "printf", List(string), _) =>
-      emitPuts()
-      emitFunctionCall("puts") {
+      emitFunctionCall("printlnString") {
         shallow(string)
       }
+
+    case n @ Node(_, "P", List(x), _) =>
+      shallow(x); emitln()
+
+      if (stack.head == manifest[Int] || stack.head == manifest[Long]) {
+        if (stack.head == manifest[Long])
+          emitConvert(manifest[Int])
+
+        emitFunctionCall("printlnInt") { }
+      } else if (stack.head == manifest[Float] || stack.head == manifest[Double]) {
+        if (stack.head == manifest[Double])
+          emitConvert(manifest[Float])
+
+        emitFunctionCall("printlnFloat") { }
+      } else if (stack.head == manifest[Boolean])
+        emitFunctionCall("printlnBoolean") { }
+      else if (stack.head == manifest[Char]) {
+        ???
+      } else if (stack.head == manifest[String])
+        emitFunctionCall("printlnString") { }
 
     case n @ Node(_, _, List(_, _), _) => // val defintion
       emitLocalVariable(quote(n.n), t(n.n))
@@ -661,54 +679,43 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   }
 
   def emitLibrary(call: String): Unit = {
-    emitWasiAPIImports()
+    emitEnvironmentImports()
     emitMalloc()
-    emitAtoi()
-    emitPuts()
 
     memorySection.register("1", this) { emitln("(memory 1)") }
     exportSection.register("memory", this) { emitln("(export \"memory\" (memory 0))") }
+  }
 
-    val paramOffset = symbolTable("wasi_api_params").asInstanceOf[DataBlock].offset
+  def generateJavaScript(name: String)(m1:Manifest[_],m2:Manifest[_]): String = {
+    val paramTypes = symbolTable(name).asInstanceOf[Function].paramTypes
 
-    val usageString = registerString("\"usage: ./prog <arg>\\n\\00\"")
-    codeSection.register("main", this) {
-      emitln(
-        s"""
-           |(func $$main (export "_start")
-           |    (local $$argc i32)
-           |    (local $$argv_buf_size i32)
-           |    (local $$argv i32)
-           |    (local $$argv_buf i32)
-           |    (local $$arg i32)
-           |
-           |    (drop (call $$args_sizes_get (i32.const $paramOffset) (i32.const ${paramOffset + 4})))
-           |
-           |    (local.set $$argc (i32.load (i32.const $paramOffset)))
-           |    (local.set $$argv_buf_size (i32.load (i32.const ${paramOffset + 4})))
-           |
-           |    (if (i32.lt_u (local.get $$argc) (i32.const 2))
-           |      (then
-           |        (call $$puts (i32.const $usageString))
-           |        (return)
-           |      )
-           |    )
-           |
-           |    (local.set $$argv (call $$malloc (i32.mul (local.get $$argc) (i32.const 4))))
-           |    (local.set $$argv_buf (call $$malloc (local.get $$argv_buf_size)))
-           |
-           |    (drop (call $$args_get (local.get $$argv) (local.get $$argv_buf)))
-           |
-           |    ;; get second argument
-           |    (local.set $$arg (i32.load (i32.add (local.get $$argv) (i32.const 4))))
-           |
-           |    (call $$$call (call $$atoi (local.get $$arg)))
-           |  )
-           |""".stripMargin)
-    }
+    def args(sep: String) = paramTypes.indices map (n => s"arg$n") mkString sep
+
+    def toJsType(m: Manifest[_]) = if (m == manifest[Int] || m == manifest[Boolean]) "Int" else "Float"
+
+    val parseArgs =
+      if (m1 == manifest[Boolean])
+        paramTypes.zipWithIndex.map(a =>
+          s"""const arg${a._2} = (process.argv[${a._2 + 2}] === "true") ? true :
+             (process.argv[${a._2 + 2}] === "false") ? false : Number.NaN;""".stripMargin).mkString("\n")
+      else paramTypes.zipWithIndex.map(a =>
+        s"const arg${a._2} = Number.parse${toJsType(a._1)}(process.argv[${a._2 + 2}]);").mkString("\n")
+
+    val checkArgs = s"if (${paramTypes.indices map (i => s"isNaN(arg$i)") mkString " && "})"
+
+    val printUsage = s"""console.error(`usage: node $${process.argv[1]} ${args(" ")}`);"""
+
+    Files.readString(Path.of("src/main/js/environment.js"))
+      .replace("/*PARSE_ARGS*/", parseArgs)
+      .replace("/*CHECK_ARGS*/", checkArgs)
+      .replace("/*PRINT_USAGE*/", printUsage)
+      .replace("/*FUNCTION_CALL*/",s""".$name(${args(", ")})""")
   }
 
   override def emitAll(g: Graph, name: String)(m1:Manifest[_],m2:Manifest[_]): Unit = {
+    require(m1 == manifest[Int] || m1 == manifest[Float] || m1 == manifest[Boolean])
+    require(m2 == manifest[Unit])
+
     val ng = init(g)
 
     emitln("(module")
@@ -720,13 +727,17 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emit(src)
     }
 
-    importSection.emit(to=stream)
-    memorySection.emit(to=stream)
-    globalSection.emit(to=stream)
-    exportSection.emit(to=stream)
-    codeSection.emit(to=stream)
-    dataSection.emit(to=stream)
+    importSection.emit(to = stream)
+    memorySection.emit(to = stream)
+    globalSection.emit(to = stream)
+    exportSection.emit(to = stream)
+    codeSection.emit(to = stream)
+    dataSection.emit(to = stream)
 
     emitln(")")
+
+    emitln("---")
+
+    emit(generateJavaScript(name)(m1, m2))
   }
 }

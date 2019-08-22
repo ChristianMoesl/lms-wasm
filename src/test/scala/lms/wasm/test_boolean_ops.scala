@@ -16,8 +16,8 @@ class BooleanOpsTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("and", {
+    val src = driver.watCode
+    checkSnippet("and", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(1)
@@ -35,8 +35,8 @@ class BooleanOpsTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("or", {
+    val src = driver.watCode
+    checkSnippet("or", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(1)
@@ -54,8 +54,8 @@ class BooleanOpsTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("not", {
+    val src = driver.watCode
+    checkSnippet("not", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(1)
@@ -72,8 +72,8 @@ class BooleanOpsTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("precedence", {
+    val src = driver.watCode
+    checkSnippet("precedence", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(2)

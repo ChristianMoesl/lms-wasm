@@ -1,6 +1,6 @@
 (func $Snippet (export "Snippet") (param $x0 i32)
-  i32.const 46
-  call $puts
+  i32.const 20
+  call $printlnString
 )
 ;; output:
-A
+20

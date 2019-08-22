@@ -16,7 +16,7 @@
     i32.const 1
     i32.gt_s
   end
-  call $printf
+  call $printlnInt
 )
 ;; output:
 1

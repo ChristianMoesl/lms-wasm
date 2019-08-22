@@ -9,8 +9,8 @@
       i32.lt_s
       i32.eqz
       br_if $0
-      i32.const 46
-      call $puts
+      i32.const 20
+      call $printlnString
       local.get $x1
       i32.const 1
       i32.add
@@ -20,12 +20,12 @@
   end
 )
 ;; output:
-A
-A
-A
-A
-A
-A
-A
-A
-A
+20
+20
+20
+20
+20
+20
+20
+20
+20

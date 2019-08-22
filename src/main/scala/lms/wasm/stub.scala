@@ -1,5 +1,7 @@
 package lms.wasm
 
+import java.io.PrintStream
+
 import lms.core.stub._
 import lms.core.utils.time
 
@@ -12,25 +14,29 @@ abstract class DslDriverWasm[A: Manifest, B: Manifest] extends DslSnippet[A, B] 
   val codegen = new DslGenWasm {
     val IR: q.type = q
   }
-  lazy val (code, statics) = {
+  lazy val (jsCode, watCode, statics) = {
     val source = new java.io.ByteArrayOutputStream()
     val statics = codegen.emitSource[A,B](wrapper, "Snippet", new java.io.PrintStream(source))
-    (source.toString, statics)
+
+    val splitted = source.toString.split("---\n")
+
+    (splitted(1), splitted(0), statics)
   }
 
   lazy val f: A => Unit = {
-    val out = new java.io.PrintStream("/tmp/snippet.wat")
-    out.println(code)
-    out.close
-    import scala.sys.process._
-    (a: A) => {
-      // Express negativ integers in 2's complement because wasmtime can not handle negative integers as argument
-      val arg = a match {
-        case i: Int if i < 0 => s"""$$((2 ** 32 - ${i * (-1)}))"""
-        case _ => a
-      }
+    val jsOut = new PrintStream("/tmp/snippet.js")
+    jsOut.println(jsCode)
+    jsOut.close
 
-      (s"wasmtime /tmp/snippet.wat $arg": ProcessBuilder).lines.foreach(Console.println _)
+    val watOut = new PrintStream("/tmp/snippet.wat")
+    watOut.println(watCode)
+    watOut.close
+
+    import scala.sys.process._
+
+    (a: A) => {
+      ("wat2wasm /tmp/snippet.wat -o /tmp/snippet.wasm": ProcessBuilder).lines.foreach(Console.println _)
+      (s"node /tmp/snippet.js $a": ProcessBuilder).lines.foreach(Console.println _)
     }
   }
   def eval(a: A): Unit = { val f1 = f; time("eval")(f1(a)) }

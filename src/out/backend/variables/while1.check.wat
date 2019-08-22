@@ -17,7 +17,7 @@
     end
   end
   local.get $x1
-  call $printf
+  call $printlnInt
 )
 ;; output:
 10

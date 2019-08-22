@@ -1,7 +1,6 @@
 package lms.wasm
 
 import lms.TutorialFunSuite
-import lms.core.stub.DslDriverC
 import lms.core.virtualize
 import lms.macros.SourceContext
 
@@ -19,8 +18,8 @@ class ControlFlowTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("switch", {
+    val src = driver.watCode
+    checkSnippet("switch", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(1)

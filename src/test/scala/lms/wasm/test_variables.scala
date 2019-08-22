@@ -18,8 +18,8 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("read", {
+    val src = driver.watCode
+    checkSnippet("read", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(4)
@@ -35,8 +35,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("A\n")
       }
     }
-    val src = driver.code
-    checkSnippet("write_dead", {
+    val src = driver.watCode
+    checkSnippet("write_dead", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(4)
@@ -53,8 +53,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", x)
       }
     }
-    val src = driver.code
-    checkSnippet("write", {
+    val src = driver.watCode
+    checkSnippet("write", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(4)
@@ -72,8 +72,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", y + z)
       }
     }
-    val src = driver.code
-    checkSnippet("read_write", {
+    val src = driver.watCode
+    checkSnippet("read_write", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -90,8 +90,8 @@ class VariablesTest extends TutorialFunSuite {
         }
       }
     }
-    val src = driver.code
-    checkSnippet("while_dead1", {
+    val src = driver.watCode
+    checkSnippet("while_dead1", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -110,8 +110,8 @@ class VariablesTest extends TutorialFunSuite {
         }
       }
     }
-    val src = driver.code
-    checkSnippet("while_dead2", {
+    val src = driver.watCode
+    checkSnippet("while_dead2", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -129,8 +129,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", x)
       }
     }
-    val src = driver.code
-    checkSnippet("while1", {
+    val src = driver.watCode
+    checkSnippet("while1", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -148,8 +148,8 @@ class VariablesTest extends TutorialFunSuite {
         }
       }
     }
-    val src = driver.code
-    checkSnippet("while2", {
+    val src = driver.watCode
+    checkSnippet("while2", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -167,8 +167,8 @@ class VariablesTest extends TutorialFunSuite {
         }
       }
     }
-    val src = driver.code
-    checkSnippet("while3", {
+    val src = driver.watCode
+    checkSnippet("while3", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -192,8 +192,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", z)
       }
     }
-    val src = driver.code
-    checkSnippet("while4", {
+    val src = driver.watCode
+    checkSnippet("while4", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(5)
@@ -215,8 +215,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", x)
       }
     }
-    val src = driver.code
-    checkSnippet("if_nested", {
+    val src = driver.watCode
+    checkSnippet("if_nested", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(10)
@@ -236,8 +236,8 @@ class VariablesTest extends TutorialFunSuite {
         }
       }
     }
-    val src = driver.code
-    checkSnippet("if_nested_dead", {
+    val src = driver.watCode
+    checkSnippet("if_nested_dead", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(10)
@@ -261,8 +261,8 @@ class VariablesTest extends TutorialFunSuite {
       }
     }
 
-    val src = driver.code
-    checkSnippet("write_after_read", {
+    val src = driver.watCode
+    checkSnippet("write_after_read", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(-1)
@@ -289,8 +289,8 @@ class VariablesTest extends TutorialFunSuite {
         printf("%d\n", x)
       }
     }
-    val src = driver.code
-    checkSnippet("while_deps_read", {
+    val src = driver.watCode
+    checkSnippet("while_deps_read", driver.jsCode, {
       println(src)
       println(";; output:")
       driver.eval(2)

@@ -4,14 +4,14 @@
   i32.gt_s
   if (result i32)
     i32.const 10
-    call $printf
+    call $printlnInt
     local.get $x0
     i32.const 2
     i32.gt_s
   else
     i32.const 0
   end
-  call $printf
+  call $printlnInt
 )
 ;; output:
 0
