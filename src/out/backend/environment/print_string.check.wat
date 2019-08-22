@@ -1,6 +1,6 @@
 (func $Snippet (export "Snippet") (param $x0 i32)
-  i32.const 20
+  local.get $x0
   call $printlnString
 )
 ;; output:
-A
+Hello World!

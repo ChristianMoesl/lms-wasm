@@ -682,8 +682,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     emitEnvironmentImports()
     emitMalloc()
 
-    memorySection.register("1", this) { emitln("(memory 1)") }
-    exportSection.register("memory", this) { emitln("(export \"memory\" (memory 0))") }
+    memorySection.register("1", this) { emitln("(memory (export \"mem\") 1)") }
   }
 
   def generateJavaScript(name: String)(m1:Manifest[_],m2:Manifest[_]): String = {
@@ -693,15 +692,23 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     def toJsType(m: Manifest[_]) = if (m == manifest[Int] || m == manifest[Boolean]) "Int" else "Float"
 
-    val parseArgs =
+    def parseArg(i: Int, m: Manifest[_]) =
       if (m1 == manifest[Boolean])
-        paramTypes.zipWithIndex.map(a =>
-          s"""const arg${a._2} = (process.argv[${a._2 + 2}] === "true") ? true :
-             (process.argv[${a._2 + 2}] === "false") ? false : Number.NaN;""".stripMargin).mkString("\n")
-      else paramTypes.zipWithIndex.map(a =>
-        s"const arg${a._2} = Number.parse${toJsType(a._1)}(process.argv[${a._2 + 2}]);").mkString("\n")
+        s"""const arg$i = (process.argv[${i + 2}] === "true") ? true :
+             (process.argv[${i + 2}] === "false") ? false : Number.NaN;"""
+      else if (m1 == manifest[String])
+        ""
+      else
+        s"const arg$i = Number.parse${toJsType(m)}(process.argv[${i + 2}]);"
 
-    val checkArgs = s"if (${paramTypes.indices map (i => s"isNaN(arg$i)") mkString " && "})"
+    val parseArgs = paramTypes.zipWithIndex.map(a => parseArg(a._2, a._1)).mkString("\n")
+
+    val checkArgs = if (m1 == manifest[String]) "if (false)" else s"if (${paramTypes.indices map (i => s"isNaN(arg$i)") mkString " || "})"
+
+    val insertString = if (m1 != manifest[String]) "" else
+      s"""const arg0 = $dataOffset;""" + "\n" + paramTypes.indices
+        .map(i => s"""const arg${i + 1} = insertAt(new Uint8Array(mem.buffer), arg$i, process.argv[${i + 2}]);""")
+        .mkString("\n")
 
     val printUsage = s"""console.error(`usage: node $${process.argv[1]} ${args(" ")}`);"""
 
@@ -709,11 +716,12 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       .replace("/*PARSE_ARGS*/", parseArgs)
       .replace("/*CHECK_ARGS*/", checkArgs)
       .replace("/*PRINT_USAGE*/", printUsage)
+      .replace("/*INSERT_STRINGS*/", insertString)
       .replace("/*FUNCTION_CALL*/",s""".$name(${args(", ")})""")
   }
 
   override def emitAll(g: Graph, name: String)(m1:Manifest[_],m2:Manifest[_]): Unit = {
-    require(m1 == manifest[Int] || m1 == manifest[Float] || m1 == manifest[Boolean])
+    require(m1 == manifest[Int] || m1 == manifest[Float] || m1 == manifest[Boolean] || m1 == manifest[String])
     require(m2 == manifest[Unit])
 
     val ng = init(g)

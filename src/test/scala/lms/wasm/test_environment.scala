@@ -55,4 +55,20 @@ class EnvironmentTest extends TutorialFunSuite {
       driver.eval(false)
     })
   }
+
+  test("print_string") {
+    val driver = new DslDriverWasm[String,Unit] {
+      @virtualize
+      def snippet(arg: Rep[String]) = {
+        println(arg)
+      }
+    }
+
+    val src = driver.watCode
+    checkSnippet("print_string", driver.jsCode, {
+      println(src)
+      println(";; output:")
+      driver.eval("Hello World!")
+    })
+  }
 }
