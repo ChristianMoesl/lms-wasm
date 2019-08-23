@@ -30,6 +30,22 @@ function uint8ToString(arr){
     return String.fromCharCode.apply(null, arr);
 }
 
+function str(ptr) {
+    const buf = new Uint8Array(mem.buffer, ptr);
+    const len = strlen(buf);
+    return uint8ToString(buf.subarray(0, len));
+}
+
+function save(str, addr) {
+    insertAt(new Uint8Array(mem.buffer), addr, str);
+}
+
+function saveNew(str) {
+    const addr = mem.grow(str.length + 1);
+    save(str, addr);
+    return addr;
+}
+
 function insertAt(arr, idx, string) {
     for (var i = 0; i < string.length; i++)
         arr[idx++] = string.charCodeAt(i);
@@ -45,14 +61,18 @@ const env = {
     __memory_base: 1024,
     STACKTOP: 0,
     STACK_MAX: memory.buffer.byteLength,
+    malloc: x => mem.grow(x),
     printlnInt: x => console.log(x),
     printlnFloat: x => console.log(x),
-    printlnString: x => {
-        const buf = new Uint8Array(mem.buffer, x);
-        const len = strlen(buf);
-        console.log(uint8ToString(buf.subarray(0, len)));
-    },
+    printlnString: ptr => console.log(str(ptr)),
     printlnBoolean: x => console.log(x !== 0),
+    printlnChar: c => console.log(String.fromCharCode(c)),
+    stringSlice: (s, start, end) => saveNew(str(s).slice(start, end)),
+    // stringEqualsTo: (ls, rs) => str(ls) === str(rs),
+    stringToDouble: s => Number.parseFloat(str(s)),
+    stringToInt: s => Number.parseInt(str(s)),
+    stringLength: s => str(s).length,
+    stringCharAt: (s, i) => str(s).charAt(i),
     exit: status => process.exit(status)
 };
 

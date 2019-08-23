@@ -88,6 +88,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   override def primitive(rawType: String): String = rawType match {
     case "Unit" => ""
     case "Boolean" => "i32"
+    case "Char" => "i32"
     case "Int" => "i32"
     case "Long" => "i64"
     case "Float" => "f32" // TODO: Check if this is a translation
@@ -132,7 +133,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   def emitUnaryOperation(id: String): Unit = {
     val t = pop()
 
-    emit(s"${remap(t)}.${remapUnaryOp(id)}")
+    emitln(s"${remap(t)}.${remapUnaryOp(id)}")
 
     push(manifest[Boolean])
   }
@@ -274,6 +275,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     registerEnvironmentFunction("printlnString", List(manifest[String]))
     registerEnvironmentFunction("printlnInt", List(manifest[Int]))
     registerEnvironmentFunction("printlnFloat", List(manifest[Float]))
+    registerEnvironmentFunction("printlnChar", List(manifest[Char]))
     registerEnvironmentFunction("printlnBoolean", List(manifest[Boolean]))
     registerEnvironmentFunction("exit", List(manifest[Int]))
   }
@@ -327,7 +329,9 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     result
   }
 
-  def registerEnvironmentFunction(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]] = None) = {
+  def registerEnvironmentFunction(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]] = None): Unit = {
+    if (symbolTable contains id) return
+
     require(paramTypes.nonEmpty)
 
     symbolTable += (id -> Function(id, paramTypes, resultType))
@@ -339,6 +343,11 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
       emitln(s"""(import "env" "$id" (func $$$id (param $pTypes)$result))""")
     }
+  }
+
+  def emitEnvFunctionCall(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]] = None)(f: => Unit): Unit = {
+    registerEnvironmentFunction(id, paramTypes, resultType)
+    emitFunctionCall(id)(f)
   }
 
   def registerFunction(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]] = None, code: String = "") = {
@@ -466,16 +475,16 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     // Variables
     case n @ Node(s, "var_new", List(exp), eff) =>
       emitLocalVariable(quote(s), t(s))
-      shallow(exp); emitln()
+      shallow(exp)
       emitVarSet(s)
 
     case n @ Node(_, "var_set", List(x: Sym, y), _) =>
-      shallow(y); emitln()
+      shallow(y)
       emitVarSet(x)
 
     // Control flow
     case n @ Node(_,"?",c::(a:Block)::(b:Block)::_,_) =>
-      shallow(c); emitln()
+      shallow(c)
       emitln(s"if "); pop()
       quoteBlock(traverse(a))
       quoteElseBlock(traverse(b))
@@ -550,7 +559,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       }
 
     case n @ Node(_, "P", List(x), _) =>
-      shallow(x); emitln()
+      shallow(x)
 
       if (stack.head == manifest[Int] || stack.head == manifest[Long]) {
         if (stack.head == manifest[Long])
@@ -565,13 +574,13 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       } else if (stack.head == manifest[Boolean])
         emitFunctionCall("printlnBoolean") { }
       else if (stack.head == manifest[Char]) {
-        ???
+        emitFunctionCall("printlnChar") { }
       } else if (stack.head == manifest[String])
         emitFunctionCall("printlnString") { }
 
     case n @ Node(_, _, List(_, _), _) => // val defintion
       emitLocalVariable(quote(n.n), t(n.n))
-      shallow(n); emitln()
+      shallow(n)
       emitVarSet(n.n)
 
     case _ =>
@@ -621,14 +630,26 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
   def shallow(n: Node): Unit = n match {
 
+    // String methods
+    case n @ Node(s,op,args,_) if op.startsWith("String") =>
+      (op.substring(7), args) match {
+        case ("slice", List(lhs, start, end)) => emitEnvFunctionCall("stringSlice", List(manifest[String], manifest[Int], manifest[Int]), Some(manifest[String])) { shallow(lhs); shallow(start); shallow(end) }
+//        case ("equalsTo", List(lhs, rhs)) => emitEnvFunctionCall("stringEqualsTo", List(manifest[String], manifest[String]), Some(manifest[Boolean])) { shallow(lhs); shallow(rhs) }
+        case ("toDouble", List(rhs)) => emitEnvFunctionCall("stringToDouble", List(manifest[String]), Some(manifest[Float])) { shallow(rhs) }
+        case ("toInt", List(rhs)) => emitEnvFunctionCall("stringToInt", List(manifest[String]), Some(manifest[Int])) { shallow(rhs) }
+        case ("length", List(rhs)) => emitEnvFunctionCall("stringLength", List(manifest[String]), Some(manifest[Int])) { shallow(rhs) }
+        case ("charAt", List(lhs, i)) => emitEnvFunctionCall("stringCharAt", List(manifest[String], manifest[Int]), Some(manifest[Char])) { shallow(lhs); shallow(i) }
+        case (a, _) => System.out.println(s"TODO: $a - ${args.length}"); ???
+      }
+
     case n @ Node(s, "!", List(exp), _) =>
-      shallow(exp); emitln()
-      emitUnaryOperation("!"); emitln()
+      shallow(exp)
+      emitUnaryOperation("!")
       assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
 
     case n @ Node(s, op, List(lhs, rhs), _) =>
-      shallow(lhs); emitln()
-      shallow(rhs); emitln()
+      shallow(lhs)
+      shallow(rhs)
       emitBinaryOperation(op)
       assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
 
@@ -712,12 +733,14 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     val printUsage = s"""console.error(`usage: node $${process.argv[1]} ${args(" ")}`);"""
 
+    val functonCall = s""".$name(${args(", ")})"""
+
     Files.readString(Path.of("src/main/js/environment.js"))
       .replace("/*PARSE_ARGS*/", parseArgs)
       .replace("/*CHECK_ARGS*/", checkArgs)
       .replace("/*PRINT_USAGE*/", printUsage)
       .replace("/*INSERT_STRINGS*/", insertString)
-      .replace("/*FUNCTION_CALL*/",s""".$name(${args(", ")})""")
+      .replace("/*FUNCTION_CALL*/", functonCall)
   }
 
   override def emitAll(g: Graph, name: String)(m1:Manifest[_],m2:Manifest[_]): Unit = {
