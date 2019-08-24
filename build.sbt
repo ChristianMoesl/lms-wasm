@@ -1,6 +1,8 @@
 name := "lms-wasm"
 
-version := "0.0.1"
+organization := "org.scala-lang.virtualized"
+
+version := "0.0.1-SNAPSHOT"
 
 scalaVersion := "2.12.8"
 
@@ -12,7 +14,10 @@ resolvers += Resolver.sonatypeRepo("snapshots")
 
 resolvers += Resolver.sonatypeRepo("releases")
 
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.5" % Test
+libraryDependencies ++= Seq(
+  "org.scalatest" %% "scalatest" % "3.0.1" % "test"
+)
+
 libraryDependencies += "org.scala-lang.virtualized" %% "lms-clean" % "0.0.1-SNAPSHOT"
 
 libraryDependencies += ("org.scala-lang" % "scala-reflect" % scalaVersion.value)
@@ -27,8 +32,8 @@ libraryDependencies += "org.scala-lang.plugins" % "scala-continuations-library_2
 
 scalacOptions += "-P:continuations:enable"
 
+
+// --- testing ---
+
 // tests are not thread safe
 parallelExecution in Test := false
-
-// do not include repl scripts in assembly
-sourcesInBase := false

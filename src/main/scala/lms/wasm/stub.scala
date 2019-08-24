@@ -5,7 +5,14 @@ import java.io.PrintStream
 import lms.core.stub._
 import lms.core.utils.time
 
-trait DslGenWasm extends WasmGenBase {
+trait DslGenWasm extends WasmGenBase with CGenNumericOps
+  with CGenPrimitiveOps with CGenBooleanOps with CGenIfThenElse
+  with CGenEqual with CGenRangeOps with CGenOrderingOps
+  with CGenMiscOps with CGenArrayOps with CGenStringOps
+  with CGenSeqOps with CGenFunctions with CGenWhile
+  with CGenStaticData with CGenVariables
+  with CGenObjectOps
+  with CGenUtilOps {
   val IR: DslExp
 }
 

@@ -10,7 +10,7 @@
       i32.eqz
       br_if $0
       i32.const 20
-      call $printlnString
+      call $printString
       local.get $x1
       i32.const 1
       i32.add

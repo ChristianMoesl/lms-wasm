@@ -30,10 +30,10 @@ function uint8ToString(arr){
     return String.fromCharCode.apply(null, arr);
 }
 
-function str(ptr) {
+function str(ptr, len) {
     const buf = new Uint8Array(mem.buffer, ptr);
-    const len = strlen(buf);
-    return uint8ToString(buf.subarray(0, len));
+    const length = (len == null) ? strlen(buf) : len;
+    return uint8ToString(buf.subarray(0, length));
 }
 
 function save(str, addr) {
@@ -63,8 +63,10 @@ const env = {
     STACK_MAX: memory.buffer.byteLength,
     malloc: x => mem.grow(x),
     printlnInt: x => console.log(x),
+    printInt: x => process.stdout.write(x.toString()),
     printlnFloat: x => console.log(x),
     printlnString: ptr => console.log(str(ptr)),
+    printString: s => process.stdout.write(str(s)),
     printlnBoolean: x => console.log(x !== 0),
     printlnChar: c => console.log(String.fromCharCode(c)),
     stringSlice: (s, start, end) => saveNew(str(s).slice(start, end)),
@@ -73,7 +75,23 @@ const env = {
     stringToInt: s => Number.parseInt(str(s)),
     stringLength: s => str(s).length,
     stringCharAt: (s, i) => str(s).charAt(i),
-    exit: status => process.exit(status)
+    exit: status => process.exit(status),
+    open: name => fs.openSync(str(name), 'r'),
+    close: fd => fs.closeSync(fd),
+    fsize: fd => fs.fstatSync(fd).size,
+    mmap: (fd, len) => {
+        const bytesPerPage = 64 * 1024;
+        const start = bytesPerPage * mem.grow(Math.ceil((len * 1.0) / bytesPerPage));
+        fs.readSync(fd, new Uint8Array(mem.buffer), start, len, null);
+        return start;
+    },
+    stringFromCharArray: (arr, pos, len) => saveNew(str(arr + pos, len)),
+    printll: s => {
+        const arr = new Uint8Array(mem.buffer);
+        while (arr[s] !== '\n' && arr[s] !== ',' && arr[s] !== '\t' && arr[s] !== 0)
+            process.stdout.write(String.fromCharCode(arr[s++]));
+        return 0;
+    }
 };
 
 WebAssembly.instantiate(wasm, { env })
@@ -85,5 +103,5 @@ WebAssembly.instantiate(wasm, { env })
             console.log(returned);
     }).catch(reason => {
     console.error(reason);
-    process.error(1);
+    process.exit(1);
 });

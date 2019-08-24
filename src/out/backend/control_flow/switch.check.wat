@@ -9,7 +9,7 @@
         br $1
       end
       i32.const 20
-      call $printlnString
+      call $printString
       br $0
     end
     block $3
@@ -25,11 +25,11 @@
         br $3
       end
       i32.const 26
-      call $printlnString
+      call $printString
       br $0
     end
     i32.const 32
-    call $printlnString
+    call $printString
   end
 )
 ;; output:
