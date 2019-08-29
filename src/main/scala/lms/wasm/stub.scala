@@ -43,7 +43,7 @@ abstract class DslDriverWasm[A: Manifest, B: Manifest] extends DslSnippet[A, B] 
 
     (a: A) => {
       Seq("wat2wasm", "/tmp/snippet.wat", "-o", "/tmp/snippet.wasm").lineStream.foreach(Console.println)
-      Seq("node", "/tmp/snippet.js", s"$a").lineStream.foreach(Console.println)
+      Seq("node", "--max-old-space-size=12288", "/tmp/snippet.js", s"$a").lineStream.foreach(Console.println)
     }
   }
   def eval(a: A): Unit = { val f1 = f; time("eval")(f1(a)) }

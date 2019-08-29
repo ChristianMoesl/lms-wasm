@@ -16,7 +16,7 @@ const binaryPath = process.argv[1].replace(".js", ".wasm");
 
 const wasm = new Uint8Array(fs.readFileSync(binaryPath));
 
-const memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
+const heapInGb = 4; // 4 is maximum for wasm32
 
 var mem = null;
 
@@ -53,6 +53,10 @@ function insertAt(arr, idx, string) {
     return idx;
 }
 
+const bytesPerPage = 64 * 1024;
+
+const memory = new WebAssembly.Memory({ initial: 1024, maximum: heapInGb * Math.pow(2, 30) / bytesPerPage });
+
 const env = {
     abortStackOverflow: (err) => { throw new Error(`overflow: ` + err); },
     table: new WebAssembly.Table({ initial: 0, maximum: 0, element: 'anyfunc' }),
@@ -61,7 +65,7 @@ const env = {
     __memory_base: 1024,
     STACKTOP: 0,
     STACK_MAX: memory.buffer.byteLength,
-    malloc: x => mem.grow(x),
+    malloc: x => mem.grow(Math.ceil(x * 1.0 / bytesPerPage)) * bytesPerPage,
     printlnInt: x => console.log(x),
     printInt: x => process.stdout.write(x.toString()),
     printlnFloat: x => console.log(x),
@@ -69,6 +73,13 @@ const env = {
     printString: s => process.stdout.write(str(s)),
     printlnBoolean: x => console.log(x !== 0),
     printlnChar: c => console.log(String.fromCharCode(c)),
+    printData: (ptr, len) => {
+        var start = ptr;
+        const end = start + len;
+        const buf = new Uint8Array(mem.buffer);
+        while (start < end)
+            process.stdout.write(String.fromCharCode(buf[start++]));
+    },
     stringSlice: (s, start, end) => saveNew(str(s).slice(start, end)),
     // stringEqualsTo: (ls, rs) => str(ls) === str(rs),
     stringToDouble: s => Number.parseFloat(str(s)),
@@ -79,19 +90,15 @@ const env = {
     open: name => fs.openSync(str(name), 'r'),
     close: fd => fs.closeSync(fd),
     fsize: fd => fs.fstatSync(fd).size,
-    mmap: (fd, len) => {
-        const bytesPerPage = 64 * 1024;
+    readFile: name => {
+        const path = str(name);
+        const len = fs.statSync(path).size;
         const start = bytesPerPage * mem.grow(Math.ceil((len * 1.0) / bytesPerPage));
-        fs.readSync(fd, new Uint8Array(mem.buffer), start, len, null);
-        return start;
+        new Uint32Array(mem.buffer, start).fill(len, 0, 1);
+        const fd = fs.openSync(path, 0);
+        fs.readSync(fd, new Uint8Array(mem.buffer, start), 4, len, null);
+        return start + 4;
     },
-    stringFromCharArray: (arr, pos, len) => saveNew(str(arr + pos, len)),
-    printll: s => {
-        const arr = new Uint8Array(mem.buffer);
-        while (arr[s] !== '\n' && arr[s] !== ',' && arr[s] !== '\t' && arr[s] !== 0)
-            process.stdout.write(String.fromCharCode(arr[s++]));
-        return 0;
-    }
 };
 
 WebAssembly.instantiate(wasm, { env })
