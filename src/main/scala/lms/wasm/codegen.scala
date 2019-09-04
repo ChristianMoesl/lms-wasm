@@ -8,85 +8,90 @@ import java.nio.file.{Files, Path}
 import lms.core._
 import lms.core.Backend._
 import lms.macros.RefinedManifest
-import lms.wasm.WasmType.WasmType
-
-class WasmSection(val id: Int) {
-  private val nameMap = Array("custom", "type", "import", "function", "table", "memory", "global", "export", "start", "element", "code", "data")
-  private val registered = mutable.HashSet[String]()
-  private val stream = new ByteArrayOutputStream()
-  private val writer = new PrintStream(stream)
-  private var ongoingData = false
-
-  def register(gen: ExtendedWasmCodeGen)(f: => Unit): Unit = {
-    val save = gen.stream
-    gen.stream = writer
-
-    if (ongoingData) ???
-    ongoingData = true
-    f
-    ongoingData = false
-
-    gen.stream = save
-  }
-
-  def register(id: String, gen: ExtendedWasmCodeGen)(f: => Unit): Unit = if (!registered(id)) {
-    registered += id
-    register(gen)(f)
-  }
-
-  def emit(to: PrintStream) = {
-    if (stream.size > 0) {
-      to.println(s"\n;; *********** ${nameMap(id).capitalize} Section ***********")
-      stream.writeTo(to)
-    }
-  }
-}
-
-object WasmType extends Enumeration {
-  type WasmType = Value
-  val int32 = Value("i32")
-  val int64 = Value("i64")
-  val float32 = Value("f32")
-  val float64 = Value("f64")
-}
-
-case class TypeFeature(wasmType: WasmType, signed: Boolean = true, bits: Int = 32, ptr: Boolean = false)
-
-class SymbolEntry(name: String)
-case class Variable(id: String, m: Manifest[_]) extends SymbolEntry(id)
-case class Function(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]]) extends SymbolEntry(id)
-case class StringLiteral(id: String, offset: Int) extends SymbolEntry(id)
-case class DataBlock(id: String, offset: Int, size: Int) extends SymbolEntry(id)
-case class RecordType(id: String, m: RefinedManifest[_]) extends SymbolEntry(id)
 
 class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
-
-  private val maxIntStringLength = (math.ceil(math.log10(math.pow(2, 64))) + 2).toInt
 
   var lastNL = false
   def emit(s: String): Unit = { stream.print(s); lastNL = false }
   def emitln(s: String = "") = if (s != "" || !lastNL) {  stream.println(s); lastNL = true }
 
-  def array(innerType: String): String = "i32"
-  def function(sig: List[Manifest[_]]): String = ???
-  def nameMap: Map[String,String] = Map[String,String]()
+  class SymbolEntry(name: String)
+  case class Variable(id: String, m: Manifest[_]) extends SymbolEntry(id)
+  case class Function(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]]) extends SymbolEntry(id)
+  case class StringLiteral(id: String, offset: Int) extends SymbolEntry(id)
+  case class DataBlock(id: String, offset: Int, size: Int) extends SymbolEntry(id)
+  case class RecordType(id: String, m: RefinedManifest[_]) extends SymbolEntry(id)
 
-  def record(man: RefinedManifest[_]): String = {
+  private var symbolTable = new mutable.HashMap[String, SymbolEntry]
+
+  class WasmSection(val id: Int) {
+    private val nameMap = Array("custom", "type", "import", "function", "table", "memory", "global", "export", "start", "element", "code", "data")
+    private val registered = mutable.HashSet[String]()
+    private val stream = new ByteArrayOutputStream()
+    private val writer = new PrintStream(stream)
+    private var ongoingData = false
+
+    def register(gen: ExtendedWasmCodeGen)(f: => Unit): Unit = {
+      val save = gen.stream
+      gen.stream = writer
+
+      if (ongoingData) ???
+      ongoingData = true
+      f
+      ongoingData = false
+
+      gen.stream = save
+    }
+
+    def register(id: String, gen: ExtendedWasmCodeGen)(f: => Unit): Unit = if (!registered(id)) {
+      registered += id
+      register(gen)(f)
+    }
+
+    def emit(to: PrintStream) = {
+      if (stream.size > 0) {
+        to.println(s"\n;; *********** ${nameMap(id).capitalize} Section ***********")
+        stream.writeTo(to)
+      }
+    }
+  }
+
+  private val importSection = new WasmSection(id = 2)
+  private val memorySection = new WasmSection(id = 5)
+  private val globalSection = new WasmSection(id = 6)
+  private val exportSection = new WasmSection(id = 7)
+  private val codeSection = new WasmSection(id = 10)
+  private val dataSection = new WasmSection(id = 11)
+
+  private var dataOffset = 0
+  private val dataAlignment = 8
+
+  override def array(innerType: String): String = "i32"
+  override def function(sig: List[Manifest[_]]): String = ???
+  override def nameMap: Map[String,String] = Map[String,String]()
+
+  override def record(man: RefinedManifest[_]): String = {
     symbolTable += (man.toString -> RecordType(man.toString, man))
     "i32"
   }
 
-  def remapUnsigned(m: Manifest[_]): String = ???
+  override def remapUnsigned(m: Manifest[_]): String = ???
 
   val rename = new mutable.HashMap[Sym,String]
 
-  def quote(s: Def): String = s match {
-    case s @ Sym(n) => rename.getOrElseUpdate(s, s"x${rename.size}")
-    case Const(s: String) => "\""+s.replace("\"", "\\\"")
-      .replace("\n","\\n")
-      .replace("\t","\\t")+"\\00\"" // TODO: more escapes?
-    case Const(c: Char) => s"${c.toInt}"
+  override def quote(s: Def): String = s match {
+    case s @ Sym(n) => rename.getOrElseUpdate(s, s"$$x${rename.size}")
+    case Const(c: Char) => c.toInt.toString
     case Const(b: Boolean) => if (b) "1" else "0"
+    case Const(s: String) =>
+      val escaped = "\""+s.replace("\"", "\\\"")
+                        .replace("\n","\\n")
+                        .replace("\t","\\t")+"\\00\""
+      registerString(escaped).toString
+    case Const(x: Array[Char]) =>
+      val offset = registerDataBlock(ByteBuffer.allocate(x.length + 4)
+                      .putInt(x.length).put(x.map(_.toByte)).array)
+      (offset + 4).toString
     case Const(x) => x.toString
   }
 
@@ -95,31 +100,28 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     case _ => super.typeBlockRes(x)
   }
 
-  // Remap auxiliary function C specific
   override def primitive(rawType: String): String = rawType match {
-    case "Unit" => ""
     case "Boolean" => "i32"
     case "Char" => "i32"
     case "Int" => "i32"
     case "Long" => "i64"
-    case "Float" => "f32" // TODO: Check if this is a translation
+    case "Float" => "f32"
     case "Double" => "f64"
-    case "java.lang.String" => "i32"  // pointer
+    case "java.lang.String" => "i32"  // 32-bit pointer
     case _ => ???
   }
 
-  def typeFeature(m: Manifest[_]): TypeFeature = m.toString match {
+  def bitWidth(m: Manifest[_]): Int = m.toString match {
     case "lms.core.Unknown" => ???
-    case "Boolean" => TypeFeature(WasmType.int32, true, 32, false)
-    case "Char" => TypeFeature(WasmType.int32, false, 8, false)
-    case "Int" => TypeFeature(WasmType.int32, true, 32, false)
-    case "Long" => TypeFeature(WasmType.int64, true, 64, false)
-    case "Float" => TypeFeature(WasmType.float32, true, 32, false) // TODO: Check if this is a valid translation
-    case "Double" => TypeFeature(WasmType.float64, true, 64, false)
-    case "java.lang.String" => TypeFeature(WasmType.int32, true, 8, true) // pointer
-    case _ => TypeFeature(WasmType.int32, false, 32, true)  // reference
+    case "Boolean" => 32
+    case "Char" => 8
+    case "Int" => 32
+    case "Long" => 64
+    case "Float" => 32
+    case "Double" => 64
+    case "java.lang.String" => 8 // pointer
+    case _ => 32  // reference
   }
-
 
   def emitFunctionCall(id: String, paramTypes: List[Manifest[_]], resultType: Option[Manifest[_]])(f: => Unit) {
     f
@@ -130,8 +132,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     if (resultType.isDefined)
       push(resultType.get)
-
- //   emitln("drop") // TODO: Where to drop result?
   }
 
   val unaryop = Set("-","!","&")
@@ -179,14 +179,16 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   val comparisonop = Set("==", "!=", "<", ">", ">=", "<=")
 
   def emitBinaryOperation(id: String): Unit = {
+    def signed(m: Manifest[_]) =
+      Set[Manifest[_]](manifest[Int], manifest[Long], manifest[Float], manifest[Double]) contains m
+
     val rhs = pop()
     val lhs = pop()
-    val f = typeFeature(rhs)
 
-    // TODO: check for sign
-    assert(remap(lhs) == remap(rhs), s"Type convertion is mandatory: $lhs != $rhs")
+    assert(remap(lhs) == remap(rhs), s"type convertion is mandatory: $lhs != $rhs")
+    assert(signed(lhs) == signed(rhs), s"types with different sign are used: $lhs(sign: ${signed(lhs)} != $rhs(sign: ${signed(rhs)})}")
 
-    emitln(s"${remap(rhs)}.${remapBinOp(id, f.signed)}")
+    emitln(s"${remap(rhs)}.${remapBinOp(id, signed(rhs))}")
 
     if (comparisonop contains id)
       push(manifest[Boolean])
@@ -194,120 +196,10 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       push(rhs)
   }
 
-  def emitStrLen(): Unit = {
-    if (symbolTable contains "strlen") return
-
-    registerFunction("strlen", List(manifest[String]), Some(manifest[Int]),
-      """
-        |(func $strlen (param $str i32) (result i32)
-        |    (if (i32.eqz (i32.load8_u (local.get $str)))
-        |    (then
-        |      (return (i32.const 0))
-        |    ))
-        |    (return
-        |      (i32.add
-        |        (call $strlen (i32.add (local.get $str) (i32.const 1)))
-        |        (i32.const 1)
-        |      ))
-        |  )
-        |""".stripMargin)
-  }
-
-  // TODO: grow memory with "memory.grow" (similar to brk())
-  def emitMalloc(): Unit = {
-    if (symbolTable contains "malloc") return
-
-    registerGlobalVariable("_bump", manifest[Int], 1024) // TODO: verify value of hardcoded bump pointer
-    registerFunction("malloc", List(manifest[Int]), Some(manifest[Int]),
-      """
-        |(func $malloc (param $size i32) (result i32)
-        |  (global.get $_bump)
-        |  (i32.add (local.get $size) (global.get $_bump))
-        |  (global.set $_bump)
-        |)
-        |""".stripMargin)
-  }
-
-  def emitAtoi(): Unit = {
-    if (symbolTable contains "atoi") return
-
-    registerFunction("atoi", List(manifest[String]), Some(manifest[Int]),
-      """
-        |(func $_atoi_rec (param $sum i32) (param $str i32) (result i32)
-        |    (if (result i32) (i32.eqz (i32.load8_u (local.get $str)))
-        |      (then (local.get $sum))
-        |      (else
-        |        (call $_atoi_rec
-        |          (i32.add (i32.mul (local.get $sum) (i32.const 10))
-        |                  (i32.sub (i32.load8_u (local.get $str)) (i32.const 0x30)))
-        |          (i32.add (local.get $str) (i32.const 1)))
-        |  ))
-        |)
-        |(func $atoi (param $str i32) (result i32)
-        |  (call $_atoi_rec (i32.const 0) (local.get $str))
-        |)
-        |""".stripMargin)
-  }
-
-  def emitItoa(): Unit = {
-    if (symbolTable contains "itoa") return
-
-//    emitMalloc()
-
-    registerFunction("itoa", List(manifest[Int], manifest[String], manifest[Int]), Some(manifest[Int]),
-      """
-        |(func $_itoa_rec (param $i i32) (param $str i32) (param $base i32) (result i32)
-        |    (local $idx i32)
-        |    (if (i32.eqz (local.get $i))
-        |    (then
-        |      (return (i32.const 0)))
-        |    )
-        |    (call $_itoa_rec (i32.div_u (local.get $i) (local.get $base)) (local.get $str) (local.get $base))
-        |    (local.set $idx)
-        |    (i32.store8
-        |      (i32.add (local.get $str) (local.get $idx))
-        |      (i32.add (i32.rem_u (local.get $i) (local.get $base)) (i32.const 48))
-        |    )
-        |    (i32.add (local.get $idx) (i32.const 1))
-        |  )
-        |  (func $itoa (param $i i32) (param $str i32) (param $base i32) (result i32)
-        |    (if (result i32) (i32.eqz (local.get $i))
-        |    (then
-        |      (i32.store8 (local.get $str) (i32.const 48))
-        |      (i32.const 1)
-        |    )
-        |    (else
-        |      (call $_itoa_rec (local.get $i) (local.get $str) (local.get $base))
-        |    ))
-        |  )
-        |""".stripMargin)
-  }
-
-  def emitEnvironmentImports(): Unit = {
-    registerDataBlock("syscall_params", new Array[Byte](4 * 5))
-  }
-
-  private val importSection = new WasmSection(id = 2)
-  private val memorySection = new WasmSection(id = 5)
-  private val globalSection = new WasmSection(id = 6)
-  private val exportSection = new WasmSection(id = 7)
-  private val codeSection = new WasmSection(id = 10)
-  private val dataSection = new WasmSection(id = 11)
-  private var dataOffset = 0
-
-  private var symbolTable = new mutable.HashMap[String, SymbolEntry]
-
   private var stack = mutable.ListBuffer[Manifest[_]]()
-
-  private def push(m: Manifest[_]): Unit = {
-    stack += m
-//    emitln(s";; size = ${stack.size}")
-  }
-
-  private def pop() = {
-//    emitln(s";; size = ${stack.size - 1}")
-    stack.remove(stack.length - 1)
-  }
+  private def push(m: Manifest[_]): Unit = stack += m
+  private def pop() = stack.remove(stack.length - 1)
+  private def top = stack.last
 
   def registerGlobalVariable(id: String, m: Manifest[_], value: Int = 0): Unit = {
     require(m != manifest[Unknown])
@@ -317,13 +209,15 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     }
   }
 
+  def roundUp(n: Int, steps: Int) = Math.ceil(n.toDouble / steps.toDouble).toInt * steps
+
   def registerDataBlock(data: mutable.IndexedSeq[Byte]): Int = {
     val offset = dataOffset
     val dataString = data.map(x => "\\%02x".format(x & 0xFF)).mkString("")
     dataSection.register(this) {
       emitln(s"""(data (i32.const $dataOffset) "$dataString")""")
     }
-    dataOffset += data.length
+    dataOffset += roundUp(data.length, dataAlignment)
     offset
   }
   def registerDataBlock(id: String, data: mutable.IndexedSeq[Byte]): Int = {
@@ -341,7 +235,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emitln(s"""(data (i32.const ${dataOffset}) $string)""")
     }
     val result = dataOffset
-    dataOffset += string.length
+    dataOffset += roundUp(string.length, dataAlignment)
     result
   }
 
@@ -373,7 +267,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     symbolTable += (id -> Function(id, paramTypes.map(_._2), resultType))
 
-    val pTypes = paramTypes.map(t => s"(param $$${t._1} ${remap(t._2)})").mkString(" ")
+    val pTypes = paramTypes.map(t => s"(param ${t._1} ${remap(t._2)})").mkString(" ")
 
     val result = if (resultType.isDefined) s" (result ${remap(resultType.get)})" else ""
 
@@ -394,16 +288,12 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     }
   }
 
-//  override def remap(m: Manifest[_]): String = {
-//    if (m == manifest[mutable.IndexedSeqView[Char, Array[Char]]]) "i32" else super.remap(m)
-//  }
-
   private val localVariableStream = new ByteArrayOutputStream()
   private val localVariableWriter = new PrintStream(localVariableStream)
 
   def emitLocalVariable(id: String, m: Manifest[_]): Unit = {
     withStream(localVariableWriter) {
-      emitln(s"(local $$$id ${remap(m)})")
+      emitln(s"(local $id ${remap(m)})")
     }
   }
 
@@ -411,7 +301,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     val res = body.res
     val args = body.in
 
-    emit(s"""(func $$$name (export "$name") ${args map(s => s"(param $$${quote(s)} ${remap(t(s))})") mkString(" ")}""")
+    emit(s"""(func $$$name (export "$name") ${args map(s => s"(param ${quote(s)} ${remap(t(s))})") mkString(" ")}""")
     emitResultType(t(res)); emitln()
 
     registerFunction(name, args.map(a => t(a)), if (res != Const(())) Some(t(res)) else None)
@@ -440,7 +330,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     }
   }
 
-  private def emitVarOp(op: String, name: String, scope: String) = emitln(s"$scope.$op $$$name")
+  private def emitVarOp(op: String, name: String, scope: String) = emitln(s"$scope.$op $name")
 
   private def emitVarTee(sym: Sym): Unit = emitVarTee(quote(sym), scope(sym))
   private def emitVarTee(name: String, scope: String) = emitVarOp("tee", name, scope)
@@ -481,9 +371,13 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     require(from != to)
 
-    // TODO: generalize this
+    // trivial cases
     if (from == manifest[Char] && to == manifest[Int]) {
       push(to); return
+    } else if (to == manifest[Boolean]) {
+      if (Set[Manifest[_]](manifest[Int], manifest[Long], manifest[Float], manifest[Double], manifest[Char]) contains from) {
+        emitln(s"${remap(from)}.eqz"); push(to); return
+      } else ???
     }
 
     emit(s"${remap(to)}.")
@@ -494,8 +388,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       else if (to == manifest[Float] || to == manifest[Double]) emit(s"convert_u/${remap(from)}")
       else ???
     } else if (from == manifest[Int] || from == manifest[Long]) {
-      if (to == manifest[Boolean]) ??? // TODO: do we need this case?
-      else if (to == manifest[Char]) {
+      if (to == manifest[Char]) {
         if (from == manifest[Long]) {
           emitln(s"wrap/${remap(from)}")
           emitln("i32.const 255")
@@ -508,8 +401,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       else if (to == manifest[Float] || to == manifest[Double]) emit(s"convert_s/${remap(from)}")
       else ???
     } else if (from == manifest[Float] || from == manifest[Double]) {
-      if (to == manifest[Boolean]) ??? // TODO: do we need this case?
-      else if (to == manifest[Char]) { emitln(s"trunc_u/${remap(from)}"); emitln("i32.const 255"); emitln("i32.and") }
+      if (to == manifest[Char]) { emitln(s"trunc_u/${remap(from)}"); emitln("i32.const 255"); emitln("i32.and") }
       else if (from == manifest[Float] && to == manifest[Double]) emit(s"promote/${remap(from)}")
       else if (from == manifest[Double] && to == manifest[Float]) emit(s"demote/${remap(from)}")
       else if (to == manifest[Int] || to == manifest[Long]) emit(s"trunc_s/${remap(from)}")
@@ -532,7 +424,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emitln("else")
       f()
       if (result != manifest[Unit])
-        assert(pop() == stack.head)
+        assert(pop() == top)
     }
     emitln("end")
   }
@@ -540,45 +432,64 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
   private def emitBr(label: String) = emitln(s"br $label")
   private def emitBrIf(label: String) = { emitln(s"br_if $label"); pop() }
 
+  private var controlLabel = 0
   private def emitLoop(f: (String) => Unit) = emitBlockKind("loop")(f)
   private def emitBlock(f: (String) => Unit) = emitBlockKind("block")(f)
   private def emitBlockKind(kind: String)(f: (String) => Unit): Unit = {
-    val label = s"$$${allocateControlLabel()}"
+    val label = s"$$$controlLabel"
+    controlLabel += 1
     emitln(s"$kind $label")
     f(label)
     emitln("end")
+    controlLabel -= 1
   }
 
-  var controlLabel = 0
+  private def emitArrayElementAddress(arr: Def, idx: Def): Manifest[_] = {
+    val innerType = t(arr).typeArguments match {
+      case List(inner) => inner
+      case _ => ???
+    }
+
+    val byteWidth = bitWidth(innerType) / 8
+
+    shallow(arr); pop(); push(manifest[Int])
+    shallow(idx)
+    if (byteWidth > 1) {
+      shallow(Const(byteWidth))
+      emitBinaryOperation("*")
+    }
+    emitBinaryOperation("+")
+
+    innerType
+  }
+
   override def traverse(n: Node): Unit = n match {
 
     // Variables
-    case n @ Node(s, "var_new", List(exp), eff) =>
+    case Node(s, "var_new", List(exp), _) =>
       emitLocalVariable(quote(s), t(s))
       shallow(exp)
       emitVarSet(s)
 
-    case n @ Node(_, "var_set", List(x: Sym, y), _) =>
+    case Node(_, "var_set", List(x: Sym, y), _) =>
       shallow(y)
       emitVarSet(x)
 
     // Control flow
-    case n @ Node(_,"?",c::(a:Block)::(b:Block)::_,_) =>
+    case Node(s, "?", c::(a:Block)::(b:Block)::_, _) if !dce.live(s) =>
       shallow(c)
-      emitln(s"if "); pop()
-      quoteBlock(traverse(a))
-      quoteElseBlock(traverse(b))
+      emitIfThenElse()(() => quoteBlock(traverse(a)), Some(() => quoteBlock(traverse(b))))
 
-    case n @ Node(_,"W",List(c:Block,b:Block),_) =>
+    case Node(_, "W", List(c:Block,b:Block), _) =>
       emitBlock { block => emitLoop { loop =>
         quoteBlock(traverse(c))
-        emitln(s"${remap(stack.head)}.eqz")
+        emitln(s"${remap(top)}.eqz")
         emitBrIf(block)
         traverse(b)
         emitBr(loop)
       }}
 
-    case n @ Node(_, "switch", (guard: Exp)::default::others, _) =>
+    case Node(_, "switch", (guard: Exp)::default::others, _) =>
       val switchTypes = Set[Manifest[_]](manifest[Long], manifest[Int], manifest[Short], manifest[Char])
 
       assert(switchTypes contains t(guard))
@@ -608,10 +519,10 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       }
 
     // Comments
-    case n @ Node(_,"generate-comment", List(Const(x: String)),_) =>
+    case Node(_,"generate-comment", List(Const(x: String)),_) =>
       emit(";; "); emitln(x)
 
-    case n @ Node(s,"comment",Const(str: String)::Const(verbose: Boolean)::(b:Block)::_,_) =>
+    case Node(s,"comment",Const(str: String)::Const(verbose: Boolean)::(b:Block)::_,_) =>
       emitln(";;# " + str)
       if (verbose) {
         emitln(";; generated code for " + str.replace('_', ' '))
@@ -628,12 +539,12 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       emitln("\n;;# " + str)
 
     case _ => // val defintion
-      val size = stack.size
+      val prevSize = stack.size
       shallow(n)
       if (dce.live(n.n)) {
         emitLocalVariable(quote(n.n), t(n.n))
         emitVarSet(n.n)
-      } else if (stack.size > size) {
+      } else if (stack.size > prevSize) {
         emitln("drop"); pop()
       }
   }
@@ -669,33 +580,101 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     withWraper(wraper _)(f)
   }
 
-  def allocateControlLabel(): Int = {
-    val tmp = controlLabel
-    controlLabel += 1
-    tmp
-  }
-
-  def t(e: lms.core.Backend.Exp): Manifest[_] = typeBlockRes(e)
+  def t(e: Def): Manifest[_] =
+    if (e.isInstanceOf[Exp]) typeBlockRes(e.asInstanceOf[Exp])
+    else manifest[Unknown]
 
   var tmpCount = 0
   def emitTmpVariable(m: Manifest[_])(f: (String) => Unit): Unit = {
-    val id = s"t$tmpCount"
+    val id = s"$$t$tmpCount"
     emitLocalVariable(id, m);
     tmpCount += 1
     f(id)
-    // TODO: Fix tmp variable emit
-    //tmpCount -= 1
+  }
+
+  def typeMask(args: List[Exp]): Int = {
+    def typeMaskValue(m: Manifest[_]): Int = {
+      if (m == manifest[Boolean]) 1
+      else if (m == manifest[Char]) 2
+      else if (m == manifest[String]) 3
+      else if (m == manifest[Int]) 4
+      else if (m == manifest[Long]) 5
+      else if (m == manifest[Float]) 6
+      else if (m == manifest[Double]) 7
+      else ???
+    }
+    args.map(a => typeMaskValue(t(a))).reverse.fold(0)((acc,y) => (acc << 8) + y)
+  }
+
+  def storeEnvPrintParam(arg: (Exp, Int)) = {
+    val offset = symbolTable("_printParams").asInstanceOf[DataBlock].offset
+    shallow(Const(offset + 8 * arg._2))
+    shallow(arg._1)
+    emitStore()
+  }
+
+  def convertToEnvParamTypes(args: List[Exp]) = args.map { x =>
+    if (t(x) == manifest[Long]) manifest[Int]
+    else if (t(x) == manifest[Double]) manifest[Float]
+    else t(x)
   }
 
   def shallow(n: Node): Unit = n match {
 
-    case n @ Node(s, "NewArray", List(x) ,_) =>
-      val size = t(s).typeArguments match {
-        case List(inner) => typeFeature(inner).bits / 8
-        case _ => ???
+    case Node(s, "var_get", List(x), _) =>
+      if (dce.live(s)) shallow(x)
+
+    case Node(s, "!", List(exp), _) =>
+      shallow(exp)
+      emitUnaryOperation("!")
+      assert(t(s) == top, s"${t(s)} != $top")
+
+    case Node(_, op, List(lhs, rhs), _) if binop contains op =>
+      shallow(lhs)
+      shallow(rhs)
+      emitBinaryOperation(op)
+
+    case Node(s, "cast", List(x, y), _) =>
+      assert(t(s).toString == y.toString)
+      shallow(x)
+      emitConvert(t(s))
+
+    case Node(f, "?", c::(a:Block)::(b:Block)::_, _) =>
+      shallow(c)
+      emitIfThenElse(t(f))(() => quoteBlock(traverse(a)), Some(() => quoteBlock(traverse(b))))
+
+    // String methods
+    case n @ Node(_, op, args, _) if op.startsWith("String") =>
+      (op.substring("String.".length), args) match {
+        case ("slice", List(lhs, start, end)) =>
+          emitEnvFunctionCall("stringSlice", List(manifest[String], manifest[Int], manifest[Int]), Some(manifest[String])) {
+            shallow(lhs); shallow(start); shallow(end)
+          }
+        case ("toDouble", List(rhs)) =>
+          emitEnvFunctionCall("stringToDouble", List(manifest[String]), Some(manifest[Float])) {
+            shallow(rhs)
+          }
+        case ("toInt", List(rhs)) =>
+          emitEnvFunctionCall("stringToInt", List(manifest[String]), Some(manifest[Int])) {
+            shallow(rhs)
+          }
+        case ("length", List(rhs)) =>
+          emitEnvFunctionCall("stringLength", List(manifest[String]), Some(manifest[Int])) {
+            shallow(rhs)
+          }
+        case ("charAt", List(lhs, i)) =>
+          emitEnvFunctionCall("stringCharAt", List(manifest[String], manifest[Int]), Some(manifest[Char])) {
+            shallow(lhs); shallow(i)
+          }
+        case default => throw new NotImplementedError(n.toString)
       }
 
-      val sizePrev = stack.size
+    // Array
+    case Node(s, "NewArray", List(x) ,_) =>
+      val size = t(s).typeArguments match {
+        case List(inner) => bitWidth(inner) / 8
+        case _ => ???
+      }
 
       emitTmpVariable(manifest[Int]) { len =>
         shallow(x)
@@ -708,7 +687,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         shallow(Const(4)) // to safe length
         emitBinaryOperation("+")
 
-        // TODO: fix malloc at some point (allocates a lot atm)
         emitEnvFunctionCall("malloc", List(manifest[Int]), Some(manifest[Int])) { }
 
         emitTmpVariable(manifest[Int]) { ptr =>
@@ -724,12 +702,73 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
         pop(); push(t(s))
       }
 
-      assert(stack.size == sizePrev + 1, s"stack size: new=${stack.size} old=$sizePrev")
+    case Node(s, "array_get", List(arr, idx), _) =>
+      if (dce.live(s)) emitLoad(emitArrayElementAddress(arr, idx))
 
-    case n @ Node(s,op,args,_) if op.startsWith("unchecked") => // unchecked
-      emitln(";; unchecked: " + n)
+    case Node(s, "array_set", List(arr, idx, y), _) =>
+      emitArrayElementAddress(arr, idx)
+      shallow(y)
+      emitStore()
+
+    case Node(_, "array_length", List(arr), _) =>
+      shallow(arr); pop(); push(manifest[Int])
+      shallow(Const(4))
+      emitBinaryOperation("-")
+      emitLoad(manifest[Int])
+
+    // MiscOps
+    case Node(_, "StrSubHashCode", List(str, len), _) =>
+      emitFunctionCall("_hash", List(manifest[String], manifest[Int]), Some(manifest[Long])) {
+        shallow(str)
+        shallow(len)
+      }
+
+    case Node(_, "P", args: List[_], _) if (0 to 4 contains args.length) =>
+      val a = args.asInstanceOf[List[Exp]]
+      emitEnvFunctionCall(s"println${args.length}", List(manifest[Int])) {
+        shallow(Const(typeMask(a)))
+        a.zipWithIndex foreach storeEnvPrintParam
+      }
+
+    case Node(_, "printf", args: List[_], _) if (1 to 5 contains args.length) =>
+      val paramTypes = if (args.length > 1) List(manifest[String], manifest[Int]) else List(manifest[String])
+      val a = args.asInstanceOf[List[Exp]]
+      emitEnvFunctionCall(s"printf${a.length - 1}", paramTypes) {
+        shallow(a.head)
+
+        if (a.length > 1) {
+          shallow(Const(typeMask(a.tail)))
+          a.asInstanceOf[List[Exp]].tail.zipWithIndex foreach storeEnvPrintParam
+        }
+      }
+
+    case Node(_, "printData", List(data, len), _) =>
+      emitEnvFunctionCall("printData", List(manifest[Int], manifest[Int])) {
+        shallow(data)
+        shallow(len)
+      }
+
+    case Node(_, "readFile", List(name), _) =>
+      emitEnvFunctionCall("readFile", List(manifest[String]), Some(manifest[Array[Char]])) {
+        shallow(name)
+      }
+
+    case Node(_, "open", List(name), _) =>
+      emitEnvFunctionCall("open", List(manifest[String]), Some(manifest[Int])) {
+        shallow(name)
+      }
+
+    case Node(_, "close" , List(fd), _) =>
+      emitEnvFunctionCall("close", List(manifest[Int])) {
+        shallow(fd)
+      }
+
+    case n @ Node(_, op, _, _) if nameMap contains op =>
+      shallow(n.copy(op = nameMap(n.op)))
+
+    case Node(_, op, args, _) if op.startsWith("unchecked") =>
       val stackSize = stack.size
-      var next = 9 // skip unchecked
+      var next = "unchecked".length
       var argc = 0
       while (next < op.length && (op(next) == '(' || op(next) == '[')) {
         if (op(next) == '[') {
@@ -741,260 +780,17 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
           next = i + 1
         }
       }
-      for (n <- 1 to (stack.size - stackSize)) pop()
-      push(manifest[Int])   // TODO: hardcoded...
-      emitln(";; unchecked end: " + n)
+      for (_ <- 1 to (stack.size - stackSize)) pop()
+      push(manifest[Int])
 
-    case n @ Node(s, "StrSubHashCode", List(str, len), _) =>
-      emitFunctionCall("_hash", List(manifest[String], manifest[Int]), Some(manifest[Long])) {
-        shallow(str)
-        shallow(len)
-      }
-
-    case n @ Node(s, "cast", List(x, y), _) =>
-      shallow(x)
-      emitConvert(t(s))
-
-    case n @ Node(s, "open" ,List(name), _) =>
-      emitEnvFunctionCall("open", List(manifest[String]), Some(manifest[Int])) {
-        shallow(name)
-      }
-
-//    case n @ Node(s, "fsize" ,List(fd), _) =>
-//      emitEnvFunctionCall("fsize", List(manifest[Int]), Some(manifest[Int])) {
-//        shallow(fd)
-//      }
-
-//    case n @ Node(s, "mmap" ,List(fd, len), _) =>
-//      // TODO: what todo with pointer types?
-//      emitEnvFunctionCall("mmap", List(manifest[Int], manifest[Int]), Some(manifest[Array[Int]])) {
-//        shallow(fd)
-//        shallow(len)
-//      }
-
-    case n @ Node(s, "readFile", List(name), _) =>
-      emitEnvFunctionCall("readFile", List(manifest[String]), Some(manifest[Array[Char]])) {
-        shallow(name)
-      }
-
-    // MiscOps
-    case n @ Node(_, "printf", List(Const("%d\n"), exp), _) =>
-      emitEnvFunctionCall("printlnInt", List(manifest[Int])) {
-        shallow(exp)
-      }
-
-    case n @ Node(_, "printf", List(Const("%s\n"), str), _) =>
-      emitEnvFunctionCall("printlnString", List(manifest[String])) {
-        shallow(str)
-      }
-
-    case n @ Node(_, "printf", List(Const("%d"), exp), _) =>
-      emitEnvFunctionCall("printInt", List(manifest[Int])) {
-        shallow(exp)
-      }
-
-//    case n @ Node(_, "printData", List(arg), _) =>
-//      emitEnvFunctionCall("printIndexedSeqView", List(manifest[String])) {
-//        shallow(arg)
-//      }
-
-    case n @ Node(_, "printData", List(data, len), _) =>
-      emitEnvFunctionCall("printData", List(manifest[Int], manifest[Int])) {
-        shallow(data)
-        shallow(len)
-      }
-
-    case n @ Node(_, "printf", List(string), _) =>
-      emitEnvFunctionCall("printString", List(manifest[String])) {
-        shallow(string)
-      }
-
-    case n @ Node(_, "P", List(x), _) =>
-      shallow(x)
-
-      if (stack.head == manifest[Int] || stack.head == manifest[Long]) {
-        if (stack.head == manifest[Long])
-          emitConvert(manifest[Int])
-
-        emitEnvFunctionCall("printlnInt", List(manifest[Int])) { }
-      } else if (stack.head == manifest[Float] || stack.head == manifest[Double]) {
-        if (stack.head == manifest[Double])
-          emitConvert(manifest[Float])
-
-        emitEnvFunctionCall("printlnFloat", List(manifest[Float])) { }
-      } else if (stack.head == manifest[Boolean])
-        emitEnvFunctionCall("printlnBoolean", List(manifest[Boolean])) { }
-      else if (stack.head == manifest[Char]) {
-        emitEnvFunctionCall("printlnChar", List(manifest[Char])) { }
-      } else if (stack.head == manifest[String])
-        emitEnvFunctionCall("printlnString", List(manifest[String])) { }
-
-//    case n @ Node(s, "viewFromCharArray", List(array, pos, len), _) =>
-//      val prevStackSize = stack.size
-//
-//      val tmp = emitTmp(manifest[Int])
-//      emitEnvFunctionCall("malloc", List(manifest[Int])) {
-//        shallow(Const(8))
-//      }
-//      emitVarSet(tmp, "local")
-//      emitVarGet(tmp, "local", manifest[Int])
-//      shallow(array)
-//      shallow(pos)
-//      emitBinaryOperation("+")
-//      emitln("i32.store"); pop(); pop()
-//      emitVarGet(tmp, "local", manifest[Int])
-//      shallow(Const(4))
-//      emitBinaryOperation("+")
-//      shallow(len)
-//      emitln("i32.store"); pop(); pop()
-//      emitVarGet(tmp, "local", manifest[Int])
-//
-//      assert(stack.size == prevStackSize + 1, s"now: ${stack.size}   prev: ${prevStackSize}")
-
-    // String methods
-    case n @ Node(s,op,args,_) if op.startsWith("IndexedSeqView") =>
-      (op.substring("IndexedSeqView.".length), args) match {
-        case ("length", List(self)) => shallow(self); shallow(Const(4)); emitBinaryOperation("+"); emitln("i32.load")
-        case ("apply", List(self, idx)) => {
-          shallow(self)
-          emitln("i32.load")
-          shallow(idx)
-          emitBinaryOperation("+")
-          emitln("i32.load8_u"); pop(); push(manifest[Char])
-        }
-        case (a, _) => System.out.println(s"TODO: $a - ${args.length}"); ???
-      }
-
-    case n @ Node(s, "close" , List(fd), _) =>
-      emitEnvFunctionCall("close", List(manifest[Int])) {
-        shallow(fd)
-      }
-
-    case n @ Node(s, "array_get" ,List(arr, idx), _) =>
-      if (dce.live(s)) {
-        val sizePrev = stack.size
-
-        val toLoad = t(s)
-        val bytesToLoad = typeFeature(toLoad).bits / 8
-
-        shallow(arr); pop(); push(manifest[Int])
-        shallow(idx)
-        if (bytesToLoad > 1) {
-          shallow(Const(bytesToLoad))
-          emitBinaryOperation("*")
-        }
-        emitBinaryOperation("+")
-        emitLoad(toLoad)
-
-        assert(stack.size == sizePrev + 1, s"stack size: new=${stack.size} old=${sizePrev}")
-      }
-
-    case n @ Node(s, "array_set", List(x: Exp, idx, y: Exp), _) =>
-      val sizePrev = stack.size
-
-      val bytesToStore = t(x).typeArguments match {
-        case List(inner) => typeFeature(inner).bits / 8
-        case _ => ???
-      }
-
-      shallow(x)
-      shallow(idx)
-      if (bytesToStore > 1) {
-        shallow(Const(bytesToStore))
-        emitBinaryOperation("*")
-      }
-      emitBinaryOperation("+")
-      shallow(y)
-      emitStore()
-
-      assert(stack.size == sizePrev, s"stack size: new=${stack.size} old=${sizePrev}")
-
-    case n @ Node(s, "array_length" , List(arr), _) =>
-      shallow(arr)
-      shallow(Const(4))
-      emitBinaryOperation("-")
-      emitLoad(manifest[Int])
-
-    // String methods
-    case n @ Node(s,op,args,_) if op.startsWith("String") =>
-      (op.substring(7), args) match {
-        case ("slice", List(lhs, start, end)) => emitEnvFunctionCall("stringSlice", List(manifest[String], manifest[Int], manifest[Int]), Some(manifest[String])) { shallow(lhs); shallow(start); shallow(end) }
-//        case ("equalsTo", List(lhs, rhs)) => emitEnvFunctionCall("stringEqualsTo", List(manifest[String], manifest[String]), Some(manifest[Boolean])) { shallow(lhs); shallow(rhs) }
-        case ("toDouble", List(rhs)) => emitEnvFunctionCall("stringToDouble", List(manifest[String]), Some(manifest[Float])) { shallow(rhs) }
-        case ("toInt", List(rhs)) => emitEnvFunctionCall("stringToInt", List(manifest[String]), Some(manifest[Int])) { shallow(rhs) }
-        case ("length", List(rhs)) => emitEnvFunctionCall("stringLength", List(manifest[String]), Some(manifest[Int])) { shallow(rhs) }
-        case ("charAt", List(lhs, i)) => emitEnvFunctionCall("stringCharAt", List(manifest[String], manifest[Int]), Some(manifest[Char])) { shallow(lhs); shallow(i) }
-        case (a, _) => System.out.println(s"TODO: $a - ${args.length}"); ???
-      }
-
-    case n @ Node(s, "!", List(exp), _) =>
-      shallow(exp)
-      emitUnaryOperation("!")
-      assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
-
-    case n @ Node(s, op, List(lhs, rhs), _) if binop contains op =>
-      shallow(lhs)
-      shallow(rhs)
-      emitBinaryOperation(op)
-      // TODO: check this and emit convertion if possible?
-//      assert(t(s) == stack.head, s"${t(s)} != ${stack.head}")
-
-    case n @ Node(s,"?",List(c, a: Block, b: Block),_) if a.isPure && a.res == Const(true) =>
-      shallow(c)
-      emitIfThenElse(manifest[Boolean])(() => shallow(a.res), Some(() => quoteBlock(traverse(b))))
-
-    case n @ Node(s,"?",List(c, a: Block, b: Block),_) if b.isPure && b.res == Const(false) =>
-      shallow(c)
-      emitIfThenElse(manifest[Boolean])(() => quoteBlock(traverse(a)), Some(() => shallow(b.res)))
-
-    case n @ Node(f,"?",c::(a:Block)::(b:Block)::_,_) =>
-      shallow(c)
-      emitIfThenElse(t(f))(() => quoteBlock(traverse(a)), Some(() => quoteBlock(traverse(b))))
-
-    case n @ Node(s,op,args,_) if nameMap contains op =>
-      shallow(n.copy(op = nameMap(n.op)))
-
-    case n @ Node(s,"var_get", List(x), _) =>
-      if (dce.live(s))
-        shallow(x)
-
-    case _ =>
-      println("============shallow(n: Node)")
-      println(n)
-      println("============")
+    case _ => throw new NotImplementedError(n.toString)
   }
 
   def shallow(n: Def): Unit = n match {
     case InlineSym(n) => shallow(n)
-
-    case n @ Sym(_) =>
-      emitln(s"${scope(n)}.get $$${quote(n)}"); push(t(n))
-
-    case n @ Const(s: String) =>
-      val offset = registerString(n)
-      emitln(s"${remap(manifest[String])}.const $offset"); push(manifest[String])
-
-//    case n @ Const(x: mutable.IndexedSeqView[Char, Array[Char]]) =>
-//      val data = new Array[Char](x.length)
-//      x.copyToArray(data)
-//      val arr = registerDataBlock(data.map(_.toByte))
-//      val offset = registerDataBlock(ByteBuffer.allocate(8).putInt(arr).putInt(x.length).array())
-//      shallow(Const(offset.toInt)); pop(); push(manifest[Array[Int]])
-
-//    case n @ Const(x: List[_]) =>
-//      println(x.getClass.getSimpleName)
-
-    case n @ Const(x: Array[Char]) =>
-      emitln(s"i32.const ${registerDataBlock(ByteBuffer.allocate(x.length + 4).putInt(x.length).put(x.map(_.toByte)).array) + 4}")
-      push(manifest[Array[Char]])
-
-    case n @ Const(_) =>
-      emitln(s"${remap(t(n))}.const ${quote(n)}"); push(t(n))
-
-    case _ =>
-      println("============shallow(n: Def)")
-      println(n)
-      println("============")
+    case n @ Sym(_) => emitln(s"${scope(n)}.get ${quote(n)}"); push(t(n))
+    case n @ Const(_) => emitln(s"${remap(t(n))}.const ${quote(n)}"); push(t(n))
+    case _ => throw new NotImplementedError(n.toString)
   }
 
   def run(name: String, g: Graph) = {
@@ -1006,27 +802,30 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     }
   }
 
-  def emitLibrary(call: String): Unit = {
+  def emitLibrary: Unit = {
 
-    //      long hash(char *str0, int len) {
-    //        unsigned char* str = (unsigned char*)str0;
-    //        unsigned long hash = 5381;
-    //        int c;
-    //        while ((c = *str++) && len--)
-    //          hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-    //        return hash;
-    //      }
+    registerDataBlock("_printParams", new Array[Byte](4 * (bitWidth(manifest[Long]) / 8)))
 
     val stream = capture {
-      val c = "t0"
-      val hash = "t1"
+      //long hash(char *str0, int len) {
+      //  unsigned char* str = (unsigned char*)str0;
+      //  unsigned long hash = 5381;
+      //  int c;
+      //  while ((c = *str++) && len--)
+      //    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+      //  return hash;
+      //}
+      val str = "$str"
+      val len = "$len"
+      emitLibraryFunction("_hash", List((str, manifest[Int]), (len, manifest[Int])), Some(manifest[Long])) {
+        val c = "$t0"
+        val hash = "$t1"
 
-      emitLibraryFunction("_hash", List(("str", manifest[Int]), ("len", manifest[Int])), Some(manifest[Long])) {
-        emitln(s"(local $$$c i32)")
-        emitln(s"(local $$$hash i64)")
+        emitln(s"(local $c i32)")
+        emitln(s"(local $hash i64)")
         shallow(Const(5381.toLong))
         emitVarSet(hash, "local")
-        emitVarGet("str", "local", manifest[String])
+        emitVarGet(str, "local", manifest[String])
         emitLoad(manifest[Char])
         emitVarSet(c, "local")
         emitBlock { block =>
@@ -1034,7 +833,7 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
             emitVarGet(c, "local", manifest[Int])
             emitln("i32.eqz")
             emitBrIf(block)
-            emitVarGet("len", "local", manifest[Int])
+            emitVarGet(len, "local", manifest[Int])
             emitln("i32.eqz")
             emitBrIf(block)
 
@@ -1043,23 +842,23 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
             emitBinaryOperation("<<")
             emitVarGet(hash, "local", manifest[Long])
             emitBinaryOperation("+")
-            emitVarGet("str", "local", manifest[Int])
+            emitVarGet(str, "local", manifest[Int])
             emitLoad(manifest[Char])
             emitConvert(manifest[Long])
             emitBinaryOperation("+")
             emitVarSet(hash, "local")
 
-            emitVarGet("str", "local", manifest[Int])
+            emitVarGet(str, "local", manifest[Int])
             shallow(Const(1))
             emitBinaryOperation("+")
-            emitVarTee("str", "local")
+            emitVarTee(str, "local")
             emitLoad(manifest[Char]);
             emitVarSet(c, "local")
 
-            emitVarGet("len", "local", manifest[Int])
+            emitVarGet(len, "local", manifest[Int])
             shallow(Const(1))
             emitBinaryOperation("-")
-            emitVarSet("len", "local");
+            emitVarSet(len, "local");
 
             emitBr(loop)
           }
@@ -1085,15 +884,25 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
     def parseArg(i: Int, m: Manifest[_]) =
       if (m1 == manifest[Boolean])
         s"""const arg$i = (process.argv[${i + 2}] === "true") ? true :
-             (process.argv[${i + 2}] === "false") ? false : Number.NaN;"""
+             (process.argv[${i + 2}] === "false") ? false : undefined;"""
       else if (m1 == manifest[String])
         ""
-      else
-        s"const arg$i = Number.parse${toJsType(m)}(process.argv[${i + 2}]);"
+      else if (m1 == manifest[Long])
+        s"var arg$i; try { arg$i = BigInt(process.argv[${i + 2}]); } catch (e) { arg$i = undefined; }"
+      else {
+        val jsType = toJsType(if (m1 == manifest[Double]) manifest[Float] else m1)
+        s"const arg$i = Number.parse$jsType(process.argv[${i + 2}]);"
+      }
 
     val parseArgs = paramTypes.zipWithIndex.map(a => parseArg(a._2, a._1)).mkString("\n")
 
-    val checkArgs = if (m1 == manifest[String]) "if (false)" else s"if (${paramTypes.indices map (i => s"isNaN(arg$i)") mkString " || "})"
+    val checkArgs =
+      if (m1 == manifest[Boolean])
+        s"if (${paramTypes.indices map (i => s"arg$i === undefined") mkString " || "})"
+      else if (m1 == manifest[String])
+        "if (false)"
+      else
+        s"if (${paramTypes.indices map (i => s"isNaN(arg$i)") mkString " || "})"
 
     val insertString = if (m1 != manifest[String]) "" else
       s"""const arg0 = $dataOffset;""" + "\n" + paramTypes.indices
@@ -1104,7 +913,6 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     val functonCall = s""".$name(${args(", ")})"""
 
-    // TODO: better path?
     Files.readString(Path.of("../lms-wasm/src/main/js/environment.js"))
       .replace("/*PARSE_ARGS*/", parseArgs)
       .replace("/*CHECK_ARGS*/", checkArgs)
@@ -1113,19 +921,18 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
       .replace("/*FUNCTION_CALL*/", functonCall)
   }
 
-  override def emitAll(g: Graph, name: String)(m1:Manifest[_],m2:Manifest[_]): Unit = {
-    require(m1 == manifest[Int] || m1 == manifest[Float] || m1 == manifest[Boolean] || m1 == manifest[String])
-    require(m2 == manifest[Unit])
+  override def emitAll(g: Graph, name: String)(m1:Manifest[_], m2:Manifest[_]): Unit = {
+    require(m1 != manifest[Long], "i64 is not allowed in WASM function in V8")
+    require(m2 == manifest[Unit], "return types are currently not supported")
 
     val ng = init(g)
 
     emitln("(module")
 
-    emitEnvironmentImports()
-    emitLibrary(name)
+    emitLibrary
 
     val src = run(name, ng)
-    codeSection.register("staged_code", this) {
+    codeSection.register(this) {
       emit(src)
     }
 

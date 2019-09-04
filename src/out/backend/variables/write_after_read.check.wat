@@ -2,8 +2,12 @@
   (local $x1 i32)
   i32.const 1
   local.set $x1
+  i32.const 32
+  i32.const 4
+  i32.const 0
   i32.const 1
-  call $printlnInt
+  i32.store
+  call $printf1
   local.get $x0
   i32.const 0
   i32.gt_s
@@ -14,8 +18,12 @@
     i32.const 3
     local.set $x1
   end
+  i32.const 32
+  i32.const 4
+  i32.const 0
   local.get $x1
-  call $printlnInt
+  i32.store
+  call $printf1
 )
 ;; output:
 1

@@ -23,6 +23,23 @@ class EnvironmentTest extends TutorialFunSuite {
     })
   }
 
+  test("print_long") {
+    // long type is not supported for WASM in V8
+    val driver = new DslDriverWasm[Int,Unit] {
+      @virtualize
+      def snippet(arg: Rep[Int]) = {
+        println(arg.toLong)
+      }
+    }
+
+    val src = driver.watCode
+    checkOut("print_long", driver.jsCode, {
+      println(src)
+      println(";; output:")
+      driver.eval(1)
+    })
+  }
+
   test("print_float") {
     val driver = new DslDriverWasm[Float,Unit] {
       @virtualize
@@ -36,6 +53,22 @@ class EnvironmentTest extends TutorialFunSuite {
       println(src)
       println(";; output:")
       driver.eval(2.4000000953674316.toFloat)
+    })
+  }
+
+  test("print_double") {
+    val driver = new DslDriverWasm[Double,Unit] {
+      @virtualize
+      def snippet(arg: Rep[Double]) = {
+        println(arg)
+      }
+    }
+
+    val src = driver.watCode
+    checkOut("print_double", driver.jsCode, {
+      println(src)
+      println(";; output:")
+      driver.eval(2.4000000953674316.toDouble)
     })
   }
 

@@ -8,13 +8,13 @@
   local.set $x2
   i32.const 0
   local.set $x3
-  block $2
-    loop $3
+  block $0
+    loop $1
       local.get $x1
       i32.const 10
       i32.lt_s
       i32.eqz
-      br_if $2
+      br_if $0
       local.get $x3
       local.get $x2
       i32.add
@@ -27,11 +27,15 @@
       i32.const 1
       i32.add
       local.set $x1
-      br $3
+      br $1
     end
   end
+  i32.const 32
+  i32.const 4
+  i32.const 0
   local.get $x3
-  call $printlnInt
+  i32.store
+  call $printf1
 )
 ;; output:
 36

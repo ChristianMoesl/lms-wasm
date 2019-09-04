@@ -1,8 +1,8 @@
-(func $Snippet (export "Snippet") (param $x0 f32)
-  i32.const 6
+(func $Snippet (export "Snippet") (param $x0 f64)
+  i32.const 7
   i32.const 0
   local.get $x0
-  f32.store
+  f64.store
   call $println1
 )
 ;; output:

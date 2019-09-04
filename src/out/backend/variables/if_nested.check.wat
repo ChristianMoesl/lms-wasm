@@ -12,10 +12,16 @@
     if
       i32.const 2
       local.set $x1
+    else
     end
+  else
   end
+  i32.const 32
+  i32.const 4
+  i32.const 0
   local.get $x1
-  call $printlnInt
+  i32.store
+  call $printf1
 )
 ;; output:
 1

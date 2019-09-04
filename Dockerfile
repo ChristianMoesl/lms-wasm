@@ -22,6 +22,9 @@ RUN apt-get update \
        cmake \
   && rm -rf /var/lib/apt/lists/*
 
+RUN npm install --global --productive printf
+ENV NODE_PATH /usr/lib/node_modules
+
 RUN git clone --recursive https://github.com/WebAssembly/wabt \
   && cd wabt \
   && make gcc-release-no-tests \

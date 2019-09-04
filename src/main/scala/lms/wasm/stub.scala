@@ -52,8 +52,6 @@ abstract class DslDriverWasm[A: Manifest, B: Manifest] extends DslSnippet[A, B] 
 trait WasmGenBase extends ExtendedWasmCodeGen {
   val IR: Base
   import IR._
-  // def remap[A](m: Manifest[A]): String = ???
-  // def quote(x: Exp[Any]) : String = ???
   def emitNode(sym: Sym[Any], rhs: Def[Any]): Unit = ???
   def emitSource[A : Manifest, B : Manifest](f: Rep[A]=>Rep[B], className: String, stream: java.io.PrintStream): List[(Class[_], Any)] = {
     val statics = Adapter.emitCommon1(className,this,stream)(manifest[A],manifest[B])(x => Unwrap(f(Wrap[A](x))))
