@@ -4,7 +4,7 @@
   local.get $x0
   i64.extend_s/i32
   i64.store
-  call $println1
+  call $println
 )
 ;; output:
 1

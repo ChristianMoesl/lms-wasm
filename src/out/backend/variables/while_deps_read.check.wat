@@ -18,7 +18,7 @@
         i32.const 0
         local.get $x1
         i32.store
-        call $printf1
+        call $printf
         local.get $x1
         i32.const 1
         i32.add
@@ -31,7 +31,7 @@
     i32.const 0
     i32.const 1
     i32.store
-    call $printf1
+    call $printf
   else
   end
   i32.const 32
@@ -39,7 +39,7 @@
   i32.const 0
   local.get $x1
   i32.store
-  call $printf1
+  call $printf
   i32.const 32
   i32.const 4
   i32.const 0
@@ -47,7 +47,7 @@
   i32.const 1
   i32.add
   i32.store
-  call $printf1
+  call $printf
 )
 ;; output:
 1

@@ -35,7 +35,7 @@
   i32.const 0
   local.get $x3
   i32.store
-  call $printf1
+  call $printf
 )
 ;; output:
 36

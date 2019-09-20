@@ -5,6 +5,6 @@
   i32.const 3
   call $stringCharAt
   i32.store8
-  call $println1
+  call $println
 )
 ;; output:

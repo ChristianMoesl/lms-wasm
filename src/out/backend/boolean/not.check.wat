@@ -7,7 +7,7 @@
   i32.gt_s
   i32.eqz
   i32.store
-  call $printf1
+  call $printf
 )
 ;; output:
 1

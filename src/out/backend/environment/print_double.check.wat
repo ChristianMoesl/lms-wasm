@@ -3,7 +3,7 @@
   i32.const 0
   local.get $x0
   f64.store
-  call $println1
+  call $println
 )
 ;; output:
 2.4000000953674316

@@ -14,7 +14,7 @@
       i32.const 0
       local.get $x1
       i32.store
-      call $printf1
+      call $printf
       local.get $x1
       i32.const 1
       i32.add

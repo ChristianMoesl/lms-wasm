@@ -3,11 +3,13 @@ package lms.wasm
 import scala.collection.mutable
 import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.ByteBuffer
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, Paths}
 
 import lms.core._
 import lms.core.Backend._
 import lms.macros.RefinedManifest
+
+import scala.io.Source
 
 class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
@@ -725,21 +727,17 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     case Node(_, "P", args: List[_], _) if (0 to 4 contains args.length) =>
       val a = args.asInstanceOf[List[Exp]]
-      emitEnvFunctionCall(s"println${args.length}", List(manifest[Int])) {
+      emitEnvFunctionCall(s"println", List(manifest[Int])) {
         shallow(Const(typeMask(a)))
         a.zipWithIndex foreach storeEnvPrintParam
       }
 
     case Node(_, "printf", args: List[_], _) if (1 to 5 contains args.length) =>
-      val paramTypes = if (args.length > 1) List(manifest[String], manifest[Int]) else List(manifest[String])
       val a = args.asInstanceOf[List[Exp]]
-      emitEnvFunctionCall(s"printf${a.length - 1}", paramTypes) {
+      emitEnvFunctionCall(s"printf", List(manifest[String], manifest[Int])) {
         shallow(a.head)
-
-        if (a.length > 1) {
-          shallow(Const(typeMask(a.tail)))
-          a.asInstanceOf[List[Exp]].tail.zipWithIndex foreach storeEnvPrintParam
-        }
+        shallow(Const(typeMask(a.tail)))
+        a.asInstanceOf[List[Exp]].tail.zipWithIndex foreach storeEnvPrintParam
       }
 
     case Node(_, "printData", List(data, len), _) =>
@@ -883,15 +881,15 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     def parseArg(i: Int, m: Manifest[_]) =
       if (m1 == manifest[Boolean])
-        s"""const arg$i = (process.argv[${i + 2}] === "true") ? true :
-             (process.argv[${i + 2}] === "false") ? false : undefined;"""
+        s"""const arg$i = (args[$i] === "true") ? true :
+             (args[$i] === "false") ? false : undefined;"""
       else if (m1 == manifest[String])
         ""
       else if (m1 == manifest[Long])
-        s"var arg$i; try { arg$i = BigInt(process.argv[${i + 2}]); } catch (e) { arg$i = undefined; }"
+        s"let arg$i; try { arg$i = BigInt(args[$i]); } catch (e) { arg$i = undefined; }"
       else {
         val jsType = toJsType(if (m1 == manifest[Double]) manifest[Float] else m1)
-        s"const arg$i = Number.parse$jsType(process.argv[${i + 2}]);"
+        s"const arg$i = Number.parse$jsType(args[$i]);"
       }
 
     val parseArgs = paramTypes.zipWithIndex.map(a => parseArg(a._2, a._1)).mkString("\n")
@@ -906,24 +904,24 @@ class ExtendedWasmCodeGen extends CompactTraverser with ExtendedCodeGen {
 
     val insertString = if (m1 != manifest[String]) "" else
       s"""const arg0 = $dataOffset;""" + "\n" + paramTypes.indices
-        .map(i => s"""const arg${i + 1} = insertAt(new Uint8Array(mem.buffer), arg$i, process.argv[${i + 2}]);""")
+        .map(i => s"""const arg${i + 1} = insertAt(new Uint8Array(mem.buffer), arg$i, args[$i]);""")
         .mkString("\n")
 
-    val printUsage = s"""console.error(`usage: node $${process.argv[1]} ${args(" ")}`);"""
+    val usageString = s"""const s = `usage: ${args(", ")}`;"""
 
     val functonCall = s""".$name(${args(", ")})"""
 
-    Files.readString(Path.of("../lms-wasm/src/main/js/environment.js"))
+    Source.fromResource("environment.js").getLines().mkString("\n")
       .replace("/*PARSE_ARGS*/", parseArgs)
       .replace("/*CHECK_ARGS*/", checkArgs)
-      .replace("/*PRINT_USAGE*/", printUsage)
+      .replace("/*USAGE_STRING*/", usageString)
       .replace("/*INSERT_STRINGS*/", insertString)
       .replace("/*FUNCTION_CALL*/", functonCall)
   }
 
   override def emitAll(g: Graph, name: String)(m1:Manifest[_], m2:Manifest[_]): Unit = {
     require(m1 != manifest[Long], "i64 is not allowed in WASM function in V8")
-    require(m2 == manifest[Unit], "return types are currently not supported")
+    require(m2 == manifest[Unit], "second argument is currently not supported")
 
     val ng = init(g)
 

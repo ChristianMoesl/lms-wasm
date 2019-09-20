@@ -3,7 +3,7 @@
   i32.const 0
   local.get $x0
   i32.store8
-  call $println1
+  call $println
 )
 ;; output:
 Hello World!

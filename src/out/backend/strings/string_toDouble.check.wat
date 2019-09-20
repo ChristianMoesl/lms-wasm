@@ -4,7 +4,7 @@
   local.get $x0
   call $stringToDouble
   f32.store
-  call $println1
+  call $println
 )
 ;; output:
 5.55597758e-315

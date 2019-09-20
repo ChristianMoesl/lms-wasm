@@ -9,7 +9,8 @@
         br $1
       end
       i32.const 32
-      call $printf0
+      i32.const 0
+      call $printf
       br $0
     end
     block $1
@@ -25,11 +26,13 @@
         br $1
       end
       i32.const 40
-      call $printf0
+      i32.const 0
+      call $printf
       br $0
     end
     i32.const 48
-    call $printf0
+    i32.const 0
+    call $printf
   end
 )
 ;; output:

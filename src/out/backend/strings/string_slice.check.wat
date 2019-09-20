@@ -6,6 +6,6 @@
   i32.const 6
   call $stringSlice
   i32.store8
-  call $println1
+  call $println
 )
 ;; output:

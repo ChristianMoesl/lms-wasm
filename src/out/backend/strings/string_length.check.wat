@@ -4,7 +4,7 @@
   local.get $x0
   call $stringLength
   i32.store
-  call $println1
+  call $println
 )
 ;; output:
 12

@@ -5,14 +5,13 @@ import java.io.PrintStream
 import lms.core.stub._
 import lms.core.utils.time
 
-trait DslGenWasm extends WasmGenBase with CGenNumericOps
-  with CGenPrimitiveOps with CGenBooleanOps with CGenIfThenElse
-  with CGenEqual with CGenRangeOps with CGenOrderingOps
-  with CGenMiscOps with CGenArrayOps with CGenStringOps
-  with CGenSeqOps with CGenFunctions with CGenWhile
-  with CGenStaticData with CGenVariables
-  with CGenObjectOps
-  with CGenUtilOps {
+trait DslGenWasm extends WasmGenBase with WasmGenNumericOps
+  with WasmGenPrimitiveOps with WasmGenBooleanOps with WasmGenIfThenElse
+  with WasmGenEqual with WasmGenOrderingOps
+  with WasmGenMiscOps with WasmGenArrayOps with WasmGenStringOps
+  with WasmGenFunctions with WasmGenWhile
+  with WasmGenStaticData with WasmGenVariables
+  with WasmGenUtilOps {
   val IR: DslExp
 }
 
@@ -60,3 +59,19 @@ trait WasmGenBase extends ExtendedWasmCodeGen {
   }
   def emitSource[A : Manifest](args: List[Sym[_]], body: Block[A], className: String, stream: java.io.PrintStream): List[(Sym[Any], Any)] = ???
 }
+
+trait WasmGenNumericOps extends WasmGenBase
+trait WasmGenPrimitiveOps extends WasmGenBase
+trait WasmGenBooleanOps extends WasmGenBase
+trait WasmGenIfThenElse extends WasmGenBase
+trait WasmGenEqual extends WasmGenBase
+trait WasmGenOrderingOps extends WasmGenBase
+trait WasmGenMiscOps extends WasmGenBase
+trait WasmGenArrayOps extends WasmGenBase
+trait WasmGenStringOps extends WasmGenBase
+trait WasmGenFunctions extends WasmGenBase
+trait WasmGenWhile extends WasmGenBase
+trait WasmGenStaticData extends WasmGenBase
+trait WasmGenVariables extends WasmGenBase
+trait WasmGenUtilOps extends WasmGenBase
+trait WasmGenUncheckedOps extends WasmGenBase

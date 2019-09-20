@@ -7,7 +7,7 @@
   i32.const 0
   i32.const 1
   i32.store
-  call $printf1
+  call $printf
   local.get $x0
   i32.const 0
   i32.gt_s
@@ -23,7 +23,7 @@
   i32.const 0
   local.get $x1
   i32.store
-  call $printf1
+  call $printf
 )
 ;; output:
 1

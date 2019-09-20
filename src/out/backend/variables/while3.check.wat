@@ -10,7 +10,8 @@
       i32.eqz
       br_if $0
       i32.const 32
-      call $printf0
+      i32.const 0
+      call $printf
       local.get $x1
       i32.const 1
       i32.add

@@ -20,7 +20,7 @@
     i32.gt_s
   end
   i32.store
-  call $printf1
+  call $printf
 )
 ;; output:
 1
