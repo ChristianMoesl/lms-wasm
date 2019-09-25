@@ -3,7 +3,7 @@ package lms.wasm
 import java.io.PrintStream
 
 import lms.core.stub._
-import lms.core.utils.time
+import lms.core.utils.{time,withTiming,nullout}
 
 trait DslGenWasm extends WasmGenBase with WasmGenNumericOps
   with WasmGenPrimitiveOps with WasmGenBooleanOps with WasmGenIfThenElse
@@ -53,9 +53,10 @@ trait WasmGenBase extends ExtendedWasmCodeGen {
   import IR._
   def emitNode(sym: Sym[Any], rhs: Def[Any]): Unit = ???
   def emitSource[A : Manifest, B : Manifest](f: Rep[A]=>Rep[B], className: String, stream: java.io.PrintStream): List[(Class[_], Any)] = {
-    val statics = Adapter.emitCommon1(className,this,stream)(manifest[A],manifest[B])(x => Unwrap(f(Wrap[A](x))))
-    // stream.println(src)
-    statics.toList
+    withTiming[List[(Class[_], Any)]](nullout, nullout) {
+      val statics = Adapter.emitCommon1(className,this, stream)(manifest[A],manifest[B])(x => Unwrap(f(Wrap[A](x))))
+      statics.toList
+    }
   }
   def emitSource[A : Manifest](args: List[Sym[_]], body: Block[A], className: String, stream: java.io.PrintStream): List[(Sym[Any], Any)] = ???
 }
