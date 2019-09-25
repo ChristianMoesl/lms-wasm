@@ -1,4 +1,4 @@
-ARG JDK_VERSION=11
+ARG JDK_VERSION=8
 
 FROM openjdk:${JDK_VERSION}
 
@@ -43,7 +43,6 @@ RUN git clone https://github.com/TiarkRompf/lms-clean \
 COPY . /opt/lms-wasm/
 
 WORKDIR /opt/lms-wasm
-VOLUME  /opt/lms-wasm
 
 # compile it
 RUN sbt compile
