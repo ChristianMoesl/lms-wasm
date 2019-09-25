@@ -1,5 +1,4 @@
-# lms-wasm: WASM as an embedded DSL in Scala
-[![Build Status](https://travis-ci.org/ChristianMoesl/lms-wasm.svg?branch=master)](https://travis-ci.org/ChristianMoesl/lms-wasm)
+# lms-wasm: WASM as an embedded DSL in Scala ![](https://github.com/ChristianMoesl/lms-wasm/workflows/ci/badge.svg)
 
 ## Setup
 
