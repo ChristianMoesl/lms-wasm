@@ -1,0 +1,22 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v1
+    
+    - name: Build
+      run: docker build -t christianmoesl/lms-wasm .
+    
+    - name: Test
+      run: docker run christianmoesl/lms-wasm sbt test
+
+    - name: Update DockerHub Image
+      if: github.ref == 'refs/heads/master'
+      run: |
+        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u christianmoesl --password-stdin
+        docker push christianmoesl/lms-wasm
