@@ -180,27 +180,13 @@ async function fetchBinary(path) {
     return new Uint8Array(binary);
 }
 
-async function run(...args) {
-    function printUsage() {
-        /*USAGE_STRING*/
-        error(s);
-    }
-
-    /*PARSE_ARGS*/
-
-    /*CHECK_ARGS*/ printUsage();
-
-    consoleOutput = [ ];
-
-    allocated = 0;
-    bump = 0;
-
+function createEnvironment() {
     const memory = new WebAssembly.Memory({
         initial: 256,
         maximum: heapInGb * Math.pow(2, 30) / bytesPerPage
     });
 
-    let env = {
+    return {
         abortStackOverflow: (err) => { throw new Error(`overflow: ` + err); },
         table: new WebAssembly.Table({ initial: 0, maximum: 0, element: 'anyfunc' }),
         __table_base: 0,
@@ -218,12 +204,28 @@ async function run(...args) {
         stringLength: s => str(s).length,
         stringCharAt: (s, i) => str(s).charAt(i),
         readFile: isBrowser ? fetchFile : readFileNode,
-    };
+    }
+}
+
+async function run(...args) {
+    function printUsage() {
+        /*USAGE_STRING*/
+        error(s);
+    }
+
+    /*PARSE_ARGS*/
+
+    /*CHECK_ARGS*/ printUsage();
+
+    consoleOutput = [ ];
+
+    allocated = 0;
+    bump = 0;
 
     let returned = undefined;
     try {
         const wasm = await fetchBinary(wasmPath);
-        const results = await WebAssembly.instantiate(wasm, { env });
+        const results = await WebAssembly.instantiate(wasm, { env: createEnvironment() });
 
         mem = results.instance.exports.mem;
         /*INSERT_STRINGS*/
@@ -245,42 +247,9 @@ async function runBinary(binary) {
     allocated = 0;
     bump = 0;
 
-    const memory = new WebAssembly.Memory({
-        initial: 256,
-        maximum: heapInGb * Math.pow(2, 30) / bytesPerPage
-    });
-
-    let env = {
-        abortStackOverflow: (err) => { throw new Error(`overflow: ` + err); },
-        table: new WebAssembly.Table({ initial: 0, maximum: 0, element: 'anyfunc' }),
-        __table_base: 0,
-        memory,
-        __memory_base: 1024,
-        STACKTOP: 0,
-        STACK_MAX: memory.buffer.byteLength,
-        malloc: x => malloc(x),
-        println0: isNode ? printlnConsole : printlnString,
-        println1: isNode ? printlnConsole : printlnString,
-        println2: isNode ? printlnConsole : printlnString,
-        println3: isNode ? printlnConsole : printlnString,
-        println4: isNode ? printlnConsole : printlnString,
-        printf0: isNode ? printfConsole : printfString,
-        printf1: isNode ? printfConsole : printfString,
-        printf2: isNode ? printfConsole : printfString,
-        printf3: isNode ? printfConsole : printfString,
-        printf4: isNode ? printfConsole : printfString,
-        printData: isNode ? printDataConsole : printDataString,
-        stringSlice: (s, start, end) => save(str(s).slice(start, end)),
-        stringToDouble: s => Number.parseFloat(str(s)),
-        stringToInt: s => Number.parseInt(str(s)),
-        stringLength: s => str(s).length,
-        stringCharAt: (s, i) => str(s).charAt(i),
-        readFile: isBrowser ? fetchFile : readFileNode,
-    };
-
     let returned = undefined;
     try {
-        const results = await WebAssembly.instantiate(binary, { env });
+        const results = await WebAssembly.instantiate(binary, { env: createEnvironment() });
 
         mem = results.instance.exports.mem;
         returned = results.instance.exports.Snippet(1);
