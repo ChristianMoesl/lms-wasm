@@ -27,6 +27,8 @@ ENV NODE_PATH /usr/lib/node_modules
 
 RUN git clone --recursive https://github.com/WebAssembly/wabt \
   && cd wabt \
+  && git checkout tags/1.0.21 \
+  && git submodule update --init \
   && make gcc-release-no-tests \
   && mv out/gcc/Release/no-tests/wat2wasm /bin/ \
   && cd .. \
@@ -35,6 +37,7 @@ RUN git clone --recursive https://github.com/WebAssembly/wabt \
 # build lms from source
 RUN git clone https://github.com/TiarkRompf/lms-clean \
   && cd lms-clean \
+  && git checkout d584b717d951ff4dd2346a3e2e84d232c9afb375 \
   && sbt publishLocal \
   && cd .. \
   && rm -rf lms-clean
